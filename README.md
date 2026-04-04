@@ -5,6 +5,8 @@ MacBook Pro M3 36GB에서 [Goose](https://github.com/block/goose)를 활용한 *
 코드 수정 → 벤치마크 → baseline 대비 개선되면 keep(commit), 아니면 revert.  
 이것을 자동으로 최대 15회 반복합니다.
 
+Angella의 핵심은 모델 자체보다 **좋은 최적화 루프와 스캐폴딩**입니다. 현재 기본 경로는 Goose + Ollama + MCP이며, `apfel` 같은 네이티브 provider 통합은 후속 확장 대상으로 유지합니다.
+
 ## 🏗 아키텍처
 
 ```
@@ -66,6 +68,28 @@ goose session --recipe ~/.config/goose/recipes/autoresearch-loop.yaml
 - `objective_metric`: build_time / tokens_per_second / latency_ms / bundle_size
 - `benchmark_command`: 벤치마크 명령어 (예: `npm run build`)
 
+## 🎯 설계 원칙
+
+- 요청을 바로 수정하지 않고 먼저 최적화 의도와 metric을 정리합니다.
+- 각 iteration은 하나의 가설만 구현하고 metric으로 판정합니다.
+- 개선되지 않으면 revert하고, 개선 근거와 diff를 로그로 남깁니다.
+- 현재 지원 기능과 미래 확장 기능을 문서에서 분리합니다.
+
+## ✅ 현재 지원 범위
+
+- Goose를 orchestration layer로 사용
+- Ollama 기반 `qwen2.5-coder:32b`, `gemma4:26b` 설치 및 실행
+- benchmark MCP와 compare_metrics 기반 ratchet loop
+- iteration 로그 및 final report 저장
+- setup 기반 로컬 설치와 렌더된 Goose config/recipe 배포
+
+## 🧪 후속 확장 후보
+
+- `apfel` 기반 native provider 통합
+- 역할별 provider routing
+- intent clarification 강화
+- transparency 로그 구조 고도화
+- benchmark parser 정밀도 개선
 
 ## 📁 프로젝트 구조
 
@@ -107,6 +131,15 @@ Angella/
 | Swift/SwiftUI | `metric_benchmark_swift.py` | `build_time`, `latency_ms` |
 | 범용 | `metric_benchmark.py` | 모든 메트릭 |
 
+## 🔍 Intent Contract
+
+루프를 시작하기 전에 아래 4가지는 반드시 고정하는 것이 좋습니다.
+
+- 무엇을 최적화할지: 빌드 시간, latency, tokens/s, 번들 크기
+- 어떤 명령으로 측정할지: `benchmark_command`
+- 어느 수준부터 개선으로 볼지: `improvement_threshold`
+- 무엇을 희생하면 안 되는지: 기능 회귀, 테스트 실패, 불필요한 리팩토링
+
 ## 🖥 M3 36GB 실전 체크리스트
 
 - [ ] `source .env.mlx` 적용 확인
@@ -120,7 +153,7 @@ Angella/
 매 iteration마다 자동으로 로그가 생성됩니다:
 - 위치: `./logs/Goose Logs/` (또는 Obsidian vault)
 - 형식: Markdown
-- 내용: iteration 번호, 메트릭, keep/revert 판정, git diff, 요약
+- 내용: iteration 번호, 메트릭, keep/revert 판정, git diff, 요약, 선택한 가설
 
 최종 보고서는 `*-FINAL.md` 파일로 저장됩니다.
 

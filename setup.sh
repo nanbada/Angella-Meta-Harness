@@ -57,6 +57,35 @@ render_template() {
         "$template_path" > "$output_path"
 }
 
+install_python_requirements() {
+    local requirements_file=$1
+
+    if ! "$PYTHON_CMD" -m pip --version &>/dev/null; then
+        warn "pip is not available for $PYTHON_CMD. Install Python dependencies manually:"
+        echo "  $PYTHON_CMD -m ensurepip --upgrade"
+        echo "  $PYTHON_CMD -m pip install mcp fastmcp"
+        return 1
+    fi
+
+    if "$PYTHON_CMD" -m pip install -r "$requirements_file" --quiet 2>/dev/null; then
+        return 0
+    fi
+
+    warn "pip install failed. Trying with --user flag..."
+    if "$PYTHON_CMD" -m pip install -r "$requirements_file" --user --quiet 2>/dev/null; then
+        return 0
+    fi
+
+    warn "pip --user install failed. Trying with --break-system-packages..."
+    if "$PYTHON_CMD" -m pip install -r "$requirements_file" --user --break-system-packages --quiet 2>/dev/null; then
+        return 0
+    fi
+
+    fail "Could not install Python dependencies."
+    echo "  Manual install: $PYTHON_CMD -m pip install --user --break-system-packages -r $requirements_file"
+    return 1
+}
+
 echo ""
 echo "============================================"
 echo "  🦆 Angella — M3 Autoresearch Setup"
@@ -175,19 +204,10 @@ fi
 # 6. Python Dependencies for MCP Servers
 # ──────────────────────────────────────────────
 info "Installing Python dependencies for MCP servers..."
-if "$PYTHON_CMD" -m pip --version &>/dev/null; then
-    "$PYTHON_CMD" -m pip install -r "$SCRIPT_DIR/mcp-servers/requirements.txt" --quiet 2>/dev/null || {
-        warn "pip install failed. Trying with --user flag..."
-        "$PYTHON_CMD" -m pip install -r "$SCRIPT_DIR/mcp-servers/requirements.txt" --user --quiet 2>/dev/null || {
-            fail "Could not install Python dependencies."
-            echo "  Manual install: $PYTHON_CMD -m pip install mcp fastmcp"
-        }
-    }
+if install_python_requirements "$SCRIPT_DIR/mcp-servers/requirements.txt"; then
     ok "Python dependencies installed"
 else
-    warn "pip is not available for $PYTHON_CMD. Install Python dependencies manually:"
-    echo "  $PYTHON_CMD -m ensurepip --upgrade"
-    echo "  $PYTHON_CMD -m pip install mcp fastmcp"
+    exit 1
 fi
 
 # ──────────────────────────────────────────────

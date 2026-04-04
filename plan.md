@@ -1,187 +1,290 @@
 # Angella Plan
 
-## 1. 목표
+## 1. 문서 목적
 
-Angella는 Goose 기반의 로컬 자율 최적화 루프를 패키징한 프로젝트다. 핵심 목표는 다음 3가지다.
+이 문서는 [`reference.md`](/Users/nanbada/projects/Angella/reference.md)의 최초 요청사항을 현재 저장소 기준으로 재구성한 계획 문서다. 목표는 두 가지다.
 
-1. 사용자가 특정 프로젝트를 지정하면 코드 수정, 벤치마크, keep/revert를 반복하는 실행 가능한 recipe를 제공한다.
-2. M3 + Ollama/MLX 환경에서 안정적으로 동작하도록 셋업, 설정, 로그 흐름을 일관되게 제공한다.
-3. 실험성 데모가 아니라 재현 가능한 운영 도구로 발전시킨다.
+1. 원래 의도였던 Goose 기반 로컬 자율 최적화 시스템의 방향을 보존한다.
+2. 현재 실제 구현 상태와 미래 확장 구상을 분리해서 설계-구현 불일치를 줄인다.
 
-## 2. 현재 상태 요약
+## 2. 원래 요청사항 해석
 
-저장소에는 이미 주요 구성요소가 있다.
+`reference.md`가 가리키는 축은 다음 3개다.
 
-- `setup.sh`: Goose, Ollama, Python MCP 의존성, Goose config를 설치한다.
-- `config/goose-config.yaml`: Goose 전역 설정과 MCP 확장을 등록한다.
-- `recipes/autoresearch-loop.yaml`: self-optimize loop의 메인 recipe다.
-- `mcp-servers/metric_benchmark.py`: 벤치마크 실행 및 metric 비교 도구를 제공한다.
-- `mcp-servers/obsidian_auto_log.py`: iteration 로그와 최종 보고서를 저장한다.
-- `.env.mlx`: MLX/Ollama/Goose 환경 변수를 제공한다.
+1. Goose를 핵심 실행 엔진으로 삼는다.
+2. Mac 내장 AI를 활용하는 `apfel` 같은 로컬 네이티브 모델 경로를 검토한다.
+3. 2026년 AI 에이전트 설계 화두인 Autoresearch, Intent-Based Engineering, Scaffolding, Transparency를 제품 설계에 반영한다.
 
-문제는 구현 자체보다 패키징과 운영 경계가 불명확하다는 점이다. 현재 문서와 설정은 "개인 실험 환경"과 "다른 머신에서도 동작하는 배포물" 사이를 오가고 있다. 이 상태에서는 설치 성공과 실제 실행 성공이 분리된다.
+즉 Angella는 단순한 Goose 설정 모음이 아니라, 로컬 Mac 환경에서 반복 가능한 self-optimize loop를 제공하는 orchestration layer가 되어야 한다.
 
-## 3. 핵심 설계 원칙
+## 3. 제품 비전
 
-### 3.1 이식성 우선
+Angella는 다음 문제를 푸는 도구다.
 
-저장소 외부 절대 경로를 기본값으로 두지 않는다. 설정 파일, recipe, MCP 실행 경로는 저장소 루트를 기준으로 계산되거나 설치 시점에 템플릿 치환되어야 한다.
+- 사용자가 특정 프로젝트를 지정하면 AI가 개선 의도를 명확히 정리한다.
+- 변경을 작게 쪼개어 시도하고 metric으로 판정한다.
+- 개선되면 keep, 아니면 revert한다.
+- 과정 전체를 로그로 남겨 재현성과 투명성을 보장한다.
 
-### 3.2 설정은 선언적, 설치는 변환형
+핵심은 "좋은 모델 하나"가 아니라 "좋은 루프 하나"다. 모델 품질은 교체 가능하지만, 루프의 안정성, 측정, 복구, 기록은 제품 정체성에 해당한다.
 
-`config/goose-config.yaml`은 배포 템플릿으로 취급한다. `setup.sh`는 이 템플릿을 그대로 복사하는 대신 현재 설치 경로와 실행 가능한 인터프리터를 반영한 결과물을 생성해야 한다.
+## 4. 설계 배경
 
-### 3.3 루프는 반드시 되돌릴 수 있어야 함
+### 4.1 Goose를 채택하는 이유
 
-ratchet loop는 "실패 시 완전 복구"가 핵심이다. 따라서 iteration 중 생성된 신규 파일까지 포함해 항상 동일한 단위로 stage/commit/revert가 가능해야 한다.
+Goose는 CLI/recipe/extension 기반으로 도구 호출과 에이전트 흐름을 조합하기 좋다. Angella는 Goose를 포크 대체재로 만들려는 것이 아니라, Goose 위에 self-optimize workflow를 얹는 배포 레이어로 위치시킨다.
 
-### 3.4 환경 파일은 덮어쓰기보다 보존이 우선
+### 4.2 Intent-Based Engineering 반영
 
-공유 `.env`류 파일은 사용자의 기존 인증 정보를 깨뜨리면 안 된다. 예시값은 문서에 두고, 실제 `export`는 "이미 값이 없을 때만" 적용한다.
+사용자 요청은 바로 코드 변경으로 들어가면 안 된다. 먼저 최적화 의도를 짧고 검증 가능한 문장으로 정규화해야 한다. 이 단계가 빠지면 루프가 "열심히 수정하지만 무엇을 최적화하는지 불명확한 상태"로 흐르기 쉽다.
 
-### 3.5 문서와 구현은 1:1로 맞아야 함
+### 4.3 Autoresearch / Ratchet Loop 반영
 
-README, `plan.md`, recipe, config, setup 스크립트가 서로 다른 실행 방식을 말하면 유지보수가 무너진다. 문서는 반드시 현재 저장소 기준의 실제 동작만 설명해야 한다.
+핵심 반복 단위는 아래 구조를 따른다.
 
-## 4. 목표 아키텍처
+1. 목표를 명시한다.
+2. baseline을 측정한다.
+3. 하나의 가설만 구현한다.
+4. 다시 측정한다.
+5. 개선이면 keep, 아니면 revert한다.
+6. 결과를 남긴다.
 
-### 4.1 실행 흐름
+이 구조는 성능 실험, 빌드 시간 단축, 추론 속도 개선 같은 과제에 특히 적합하다.
 
-1. 사용자가 `setup.sh`로 로컬 환경을 준비한다.
-2. 사용자가 `.env.mlx`를 로드하고 Goose를 실행한다.
-3. Goose는 `recipes/autoresearch-loop.yaml`을 사용해 대상 프로젝트를 분석한다.
-4. Goose는 `developer` 확장으로 파일 수정과 git 작업을 수행한다.
-5. Goose는 `metric-benchmark` MCP로 objective metric을 측정하고, `compare_metrics`로 keep/revert를 판단한다.
-6. Goose는 `obsidian-auto-log` MCP로 iteration 로그와 최종 보고서를 저장한다.
+### 4.4 Scaffolding 반영
 
-### 4.2 구성요소 책임
+실제 업무의 큰 부분은 "문제를 푸는 사고"보다 "실행 구조를 유지하는 일"이다. Angella의 가치도 개별 프롬프트보다 setup, recipe, benchmark, revert, log, report를 패키징하는 스캐폴딩에 있다.
 
-- `setup.sh`
-  설치 검증, 템플릿 렌더링, 경로 주입, 최소 사전점검 담당.
-- `config/goose-config.yaml`
-  Goose가 로드할 전역 확장과 기본 동작 정의.
-- `recipes/autoresearch-loop.yaml`
-  최적화 루프의 행위 프로토콜 정의.
-- `mcp-servers/metric_benchmark.py`
-  측정과 판정 로직 제공.
-- `mcp-servers/obsidian_auto_log.py`
-  실험 투명성, 추적성, 결과 보관 담당.
-- `.env.mlx`
-  성능 관련 기본 환경 변수만 제공.
+### 4.5 Transparency 반영
 
-## 5. 확인된 설계 결함
+iteration별 metric, git diff, verdict를 남겨야 한다. 그래야 실패를 분석할 수 있고, 개선된 결과를 재사용할 수 있다. 로그는 부가 기능이 아니라 제품의 신뢰성 계층이다.
 
-현재 저장소 기준으로 우선 해결해야 할 설계 결함은 다음과 같다.
+## 5. 현재 구현 상태
 
-1. Goose config와 recipe가 저장소 절대 경로에 묶여 있어 다른 머신에서 바로 깨진다.
-2. recipe의 commit 전략이 `git commit -am` 기반이라 신규 파일 생성 시 ratchet 복구가 불완전하다.
-3. `.env.mlx`가 `GOOGLE_API_KEY`를 무조건 덮어써 기존 인증값을 파괴한다.
-4. Goose config는 MCP를 `python`으로 실행하지만 `setup.sh`는 `pip3`만 확인하므로 `python3`만 있는 환경에서 부팅이 실패할 수 있다.
+저장소에는 다음 구성요소가 있다.
 
-이 4개는 단순 버그가 아니라 배포 설계 문제다. 따라서 개별 수정이 아니라 설치/설정/recipe 책임을 다시 나눠야 한다.
+- [`setup.sh`](/Users/nanbada/projects/Angella/setup.sh)
+  Goose CLI, Ollama, 모델, Python MCP 의존성, 렌더된 Goose config를 설치한다.
+- [`config/goose-config.yaml`](/Users/nanbada/projects/Angella/config/goose-config.yaml)
+  Goose 전역 설정 템플릿이다.
+- [`recipes/autoresearch-loop.yaml`](/Users/nanbada/projects/Angella/recipes/autoresearch-loop.yaml)
+  메인 ratchet loop recipe 템플릿이다.
+- [`mcp-servers/metric_benchmark.py`](/Users/nanbada/projects/Angella/mcp-servers/metric_benchmark.py)
+  benchmark 실행과 metric 비교를 담당한다.
+- [`mcp-servers/obsidian_auto_log.py`](/Users/nanbada/projects/Angella/mcp-servers/obsidian_auto_log.py)
+  iteration 로그와 최종 보고서를 저장한다.
+- [`.env.mlx`](/Users/nanbada/projects/Angella/.env.mlx)
+  MLX/Ollama/Goose 관련 환경 변수를 제공한다.
 
-## 6. 최적화된 실행 계획
+현재 구현은 "Goose + Ollama + MCP" 경로에는 도달해 있다. 반면 `apfel`과 다중 provider routing은 아직 제품 설계상 후보이며, 실제 기본 경로는 아니다.
+
+## 6. 현재 아키텍처와 목표 아키텍처
+
+### 6.1 현재 아키텍처
+
+- 실행 엔진: Goose
+- 기본 모델 경로: Ollama
+- 평가/측정: metric benchmark MCP
+- 로그/투명성: obsidian auto log MCP
+- 배포 방식: setup 기반 로컬 설치
+
+### 6.2 목표 아키텍처
+
+장기적으로는 provider를 3계층으로 나누는 것이 맞다.
+
+- Orchestration layer
+  Goose가 workflow, 도구 호출, recipe 실행을 담당
+- Model layer
+  Ollama, Gemini, 향후 apfel을 역할별로 배치
+- Evidence layer
+  benchmark, git history, 로그, 보고서가 판단 근거를 담당
+
+즉 모델은 교체 가능해야 하고, loop와 evidence는 고정되어야 한다.
+
+## 7. 핵심 설계 원칙
+
+### 7.1 이식성 우선
+
+절대 경로를 기본값으로 두지 않는다. 설정 파일과 recipe는 설치 시점에 렌더링한다.
+
+### 7.2 루프 안정성 우선
+
+루프는 반드시 측정 가능하고 되돌릴 수 있어야 한다. 신규 파일 생성, 실패 iteration, dirty worktree를 모두 고려해야 한다.
+
+### 7.3 의도 정규화 우선
+
+사용자 요청은 바로 구현하지 않고 목표 metric, 임계값, 허용 가능한 tradeoff로 정리해야 한다.
+
+### 7.4 스캐폴딩 우선
+
+setup, config, benchmark, logging, reporting을 제품 기능으로 취급한다. 이것들은 "부가 도구"가 아니다.
+
+### 7.5 투명성 우선
+
+각 iteration의 이유, 변경, 측정, 판정이 로그에 남아야 한다.
+
+### 7.6 구현과 비전 분리
+
+문서는 현재 지원 기능과 미래 구상을 분리해서 적어야 한다. 아직 지원하지 않는 `apfel` 경로를 기본 동작처럼 문서화하면 안 된다.
+
+## 8. 설계 결함과 교정 방향
+
+이미 드러난 배포/운영 결함은 다음과 같다.
+
+1. 경로 하드코딩
+2. `python`/`python3` 실행 불일치
+3. `GOOGLE_API_KEY` 덮어쓰기
+4. 신규 파일이 누락되는 ratchet commit 전략
+5. setup가 pip 실패를 성공처럼 보이게 하는 오류
+
+이 결함들은 단순 구현 실수가 아니라, Angella가 스캐폴딩 계층을 제품으로 취급해야 한다는 요구를 다시 보여준다.
+
+## 9. reference.md 기반 추가 보강 포인트
+
+### 9.1 apfel 통합은 "후속 확장"으로 명확히 위치시켜야 함
+
+`reference.md`에는 apfel이 중요한 단서로 남아 있지만 현재 저장소는 이를 지원하지 않는다. 따라서 설계상으로는 다음과 같이 두는 것이 맞다.
+
+- 현재 기본 경로: Goose + Ollama + Gemini
+- 후속 실험 경로: Goose + apfel native provider
+
+즉 apfel은 제거 대상이 아니라, 문서상에서 현재 미구현 확장 후보로 복원되어야 한다.
+
+### 9.2 Intent Clarifier 계층이 plan에 더 명시되어야 함
+
+현재 문서는 ratchet loop를 설명하지만 "의도를 정규화하는 첫 단계"의 중요성이 충분히 드러나지 않는다. 목표, metric, threshold, non-goal을 먼저 고정하는 단계가 plan 상위 레벨에 승격되어야 한다.
+
+### 9.3 Transparency를 보고서 기능이 아니라 운영 원칙으로 승격해야 함
+
+지금 문서도 logging을 언급하지만, design principle과 success metric에 더 직접 연결하는 편이 맞다.
+
+### 9.4 Scaffolding을 백로그 우선순위 판단 기준으로 써야 함
+
+새 기능을 추가할 때 "모델을 하나 더 붙이는 일"보다 "실패를 줄이는 구조를 만드는 일"을 우선시해야 한다. 이 기준이 roadmap에 드러나야 한다.
+
+## 10. 단계별 실행 계획
 
 ### Phase 1. 배포 안정화
 
-목표는 "clone 후 setup, then run"이 실제로 성공하는 상태를 만드는 것이다.
+목표는 clone 후 setup, then run이 실제로 성공하는 상태를 만드는 것이다.
 
-- `setup.sh`에서 실행 가능한 Python 인터프리터를 판별한다.
-- Goose config를 템플릿 치환 방식으로 생성한다.
-- recipe/slash command/MCP 경로를 설치 경로 기준으로 주입한다.
-- `.env.mlx`에서 인증키를 기본 보존 방식으로 바꾼다.
+- setup가 설치와 실패를 정확히 판정
+- Goose config/recipe를 템플릿 렌더링
+- Python 실행 경로 일치
+- `.env.mlx`의 안전한 인증 처리
 
 완료 기준:
 
-- 임의 경로에 clone한 뒤 `bash setup.sh` 실행 시 Goose config가 올바른 실제 경로를 가리킨다.
-- `python` shim이 없어도 MCP 서버가 뜬다.
-- 기존 `GOOGLE_API_KEY`가 유지된다.
+- 임의 경로 clone 후 첫 실행 가능
+- MCP 부팅 실패율 최소화
+- 설치 실패가 성공처럼 보이지 않음
 
 ### Phase 2. 루프 무결성 강화
 
-목표는 keep/revert가 항상 같은 단위로 동작하도록 보장하는 것이다.
+목표는 ratchet loop를 운영 가능한 수준으로 만드는 것이다.
 
-- iteration 직전 `git status --short` 기준으로 작업 범위를 점검한다.
-- commit 전에 신규 파일을 포함하도록 명시적으로 stage한다.
-- revert 전략이 생성 파일까지 완전히 되돌리는지 검증한다.
-- dirty worktree 정책을 문서화한다.
-
-완료 기준:
-
-- 신규 파일 생성이 포함된 iteration도 정상 commit/revert된다.
-- 실패 iteration 후 작업 디렉토리가 이전 상태와 논리적으로 동일하다.
-
-### Phase 3. 운영 문서 정리
-
-목표는 README와 `plan.md`가 실제 구현의 단일 진실 공급원이 되는 것이다.
-
-- 빠른 시작 절차를 실제 스크립트/recipe 기준으로 통일한다.
-- 환경 변수, 의존성, 지원 범위, known limitations를 명시한다.
-- "개인 커스터마이징 예시"와 "기본 배포 경로"를 분리한다.
+- `git add -A` 기준의 완전한 stage
+- revert 후 작업 디렉터리 무결성 검증
+- dirty worktree 정책 명문화
+- baseline 측정과 threshold 판정의 일관성 확보
 
 완료 기준:
 
-- 신규 사용자가 README만 보고 설치와 첫 실행을 끝낼 수 있다.
-- `plan.md`가 설계 원칙, 리스크, 우선순위를 설명한다.
+- 신규 파일 포함 iteration도 복구 가능
+- 실패 실험의 흔적이 논리적으로 제거됨
 
-### Phase 4. 실험 고도화
+### Phase 3. Intent Layer 강화
 
-배포 안정화 이후에만 고도화 작업을 진행한다.
+목표는 요청을 바로 수정하지 않고, 최적화 계약으로 바꾸는 것이다.
 
-- 프로젝트 타입별 metric parser 정교화
-- 실패 iteration에 대한 원인 분류
-- baseline 자동 저장 및 resume
-- 로그 요약 품질 개선
-- Desktop/CLI 공통 진입점 정리
+- objective metric 강제
+- threshold와 non-goal 명시
+- target project 분석 단계 강화
+- recipe 상단에 intent clarification 규칙 명문화
 
-## 7. 우선순위 백로그
+완료 기준:
+
+- 루프 시작 전에 "무엇을 왜 최적화하는지"가 항상 명확함
+
+### Phase 4. Transparency Layer 강화
+
+목표는 결과뿐 아니라 근거를 남기는 것이다.
+
+- iteration별 제안, 선택 이유, 측정값 기록
+- keep/revert 판정 근거 저장
+- 최종 보고서 요약 정형화
+
+완료 기준:
+
+- 사후 분석만으로도 어떤 변경이 왜 남았는지 추적 가능
+
+### Phase 5. Provider 확장
+
+이 단계부터 `apfel` 같은 새로운 provider를 검토한다.
+
+- apfel 통합 feasibility 검증
+- 역할별 provider 분리
+- native model과 Ollama의 성능/지연/안정성 비교
+
+완료 기준:
+
+- 기본 경로를 깨지 않고 provider 실험 가능
+
+## 11. 우선순위 백로그
 
 ### P0
 
-- 경로 하드코딩 제거
-- Python 인터프리터 탐지 및 통일
-- `.env.mlx` 인증 변수 보존
-- recipe의 stage/commit 절차 수정
+- 배포 경로 이식성
+- Python/pip 설치 안정성
+- ratchet-safe commit/revert
+- 안전한 env 처리
 
 ### P1
 
-- setup 스크립트의 템플릿 렌더링 도입
-- dirty worktree 사전 검사 강화
-- README 실행 절차와 실제 구현 동기화
+- intent clarification 강화
+- dirty worktree 정책 강화
+- README와 실제 실행 흐름 동기화
+- transparency 로그 구조 보강
 
 ### P2
 
-- Next.js/Python/Swift 전용 parser 정확도 개선
-- 로그 파일 구조 표준화
-- 장기 실행용 실패 복구 전략 추가
+- 프로젝트 타입별 metric parser 개선
+- baseline resume
+- failure taxonomy
+- 최종 보고서 품질 개선
 
-## 8. 비목표
+### P3
+
+- apfel 통합
+- provider routing 실험
+- Goose Desktop/CLI 공통 UX 정리
+
+## 12. 비목표
 
 현재 단계에서 아래 항목은 우선순위가 아니다.
 
-- Goose 포크 자체를 배포판처럼 재구성하는 작업
-- 여러 OS를 동시에 정식 지원하는 작업
-- 멀티노드 분산 실행
-- UI/브랜딩 고도화
+- Goose 자체를 대체하는 독자 에이전트 런타임 구현
+- 다중 OS 정식 지원
+- 분산 실행 인프라
+- 화려한 UI나 브랜딩 중심 개선
 
-## 9. 성공 지표
-
-프로젝트 성공 여부는 아래 기준으로 판단한다.
+## 13. 성공 지표
 
 - 새 머신의 임의 경로 clone 후 15분 내 첫 실행 가능
-- 기본 recipe 실행 시 MCP 부팅 실패율 0에 근접
-- 신규 파일이 포함된 iteration에서도 revert 정확도 유지
-- README 기준 셋업 성공률 향상
-- 로그에서 iteration별 metric과 verdict를 재현 가능
+- setup 실패가 명확하게 드러남
+- 기본 recipe 실행 시 MCP 부팅 실패율이 낮음
+- iteration별 metric, verdict, git diff가 남음
+- 사용자가 "무엇을 최적화 중인지"를 루프 시작 전에 이해할 수 있음
+- 향후 apfel/provider 확장이 기본 경로를 깨지 않음
 
-## 10. 다음 액션
+## 14. 다음 액션
 
-바로 실행해야 할 작업 순서는 다음과 같다.
+다음 작업 순서는 아래가 맞다.
 
-1. `setup.sh`를 템플릿 기반 설치 스크립트로 수정한다.
-2. `config/goose-config.yaml`과 `recipes/autoresearch-loop.yaml`에서 절대 경로와 `python` 가정을 제거한다.
-3. `.env.mlx`의 `GOOGLE_API_KEY` 처리를 안전하게 바꾼다.
-4. recipe의 git stage/commit 전략을 ratchet-safe 방식으로 교체한다.
-5. README를 실제 동작 기준으로 다시 맞춘다.
+1. setup와 README를 실제 동작 기준으로 계속 정리한다.
+2. recipe에 intent clarification 계약을 더 명확히 반영한다.
+3. logging/reporting 구조를 보강한다.
+4. benchmark parser 정확도를 높인다.
+5. 그 다음에야 apfel/provider 확장을 검토한다.
 
-이 순서를 지키는 이유는 단순하다. 지금 프로젝트의 병목은 모델 품질이 아니라 실행 재현성과 설치 신뢰성이다. 배포 경계가 안정화된 뒤에야 self-optimize loop의 성능 실험이 의미를 가진다.
+요점은 단순하다. `reference.md`가 말하는 본질은 "모델을 더 붙여라"가 아니라 "좋은 에이전트 스캐폴딩을 만들어라"에 가깝다. Angella는 그 방향으로 설계되어야 한다.

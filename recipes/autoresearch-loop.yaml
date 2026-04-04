@@ -4,6 +4,7 @@ description: |
   Karpathy Autoresearch 스타일 ratchet loop + Intent-Based Engineering.
   M3 36GB MLX 백엔드 완전 활용 (Qwen2.5-coder:32b + Gemini 2.5 Pro).
   edit → benchmark → keep/revert 자동 반복.
+  현재 기본 provider 경로는 Goose + Ollama + MCP이며, 추가 provider 통합은 후속 확장입니다.
 
 # setup.sh가 이 템플릿을 현재 설치 경로에 맞게 렌더링합니다.
 
@@ -65,6 +66,7 @@ instructions: |
   Karpathy의 Autoresearch ratchet 방식을 따릅니다:
   코드를 수정 → 벤치마크 → baseline 대비 개선되면 keep(commit), 아니면 revert.
   이것을 최대 {{ max_iterations }}회 반복합니다.
+  이 workflow의 핵심은 좋은 모델 하나가 아니라, 명확한 의도, 작은 가설, 객관적 metric, 투명한 로그입니다.
 
   ## 대상 프로젝트
   - 경로: {{ target_project_path }}
@@ -72,17 +74,29 @@ instructions: |
   - 벤치마크 명령: {{ benchmark_command }}
   - 개선 임계값: {{ improvement_threshold }}%
 
+  ## Intent Contract
+  - 먼저 사용자의 최적화 요청을 1~2문장으로 정규화합니다.
+  - 반드시 목표 메트릭, 허용되지 않는 회귀, 성공 기준을 명시합니다.
+  - 목표와 직접 관련 없는 리팩토링은 하지 않습니다.
+  - 더 빠른 코드보다 더 신뢰할 수 있는 판정이 우선입니다.
+
   ## 실행 프로토콜
 
   ### Phase 0: 초기화
   1. `{{ target_project_path }}`로 이동하여 프로젝트 구조를 분석합니다.
   2. git 상태를 확인합니다 (`git status`). 변경사항이 있으면 먼저 commit합니다.
-  3. **Baseline 측정**: `run_benchmark` 도구를 호출합니다:
+  3. 현재 요청을 아래 형식으로 정리합니다:
+     - intent_summary: 무엇을 최적화하는가
+     - metric_reason: 왜 `{{ objective_metric }}`가 맞는가
+     - non_goals: 무엇을 망가뜨리면 안 되는가
+     - first_hypotheses: 시도할 가설 3~5개
+  4. **Baseline 측정**: `run_benchmark` 도구를 호출합니다:
      - command: "{{ benchmark_command }}"
      - metric_key: "{{ objective_metric }}"
      - working_directory: "{{ target_project_path }}"
-  4. baseline 값을 기록합니다.
-  5. `save_loop_log`로 iteration 0 (baseline)을 기록합니다.
+  5. baseline 값을 기록합니다.
+  6. `save_loop_log`로 iteration 0 (baseline)을 기록합니다.
+     - summary에는 intent_summary와 baseline 해석을 포함합니다.
 
   ### Phase 1-N: Ratchet Loop (최대 {{ max_iterations }}회)
   
@@ -92,6 +106,7 @@ instructions: |
   - 현재 코드를 분석하여 `{{ objective_metric }}` 개선 가능한 부분을 찾습니다.
   - 3~5개의 구체적인 개선 아이디어를 생성합니다.
   - 가장 유망한 아이디어 1개를 선택합니다.
+  - 선택 이유를 한 문장으로 남깁니다.
 
   **Step 2: Code Execution (구현)**
   - 선택한 아이디어를 실제 코드로 구현합니다.
@@ -112,6 +127,7 @@ instructions: |
   **Step 6: Log (기록)**
   - `save_loop_log` 도구로 이번 iteration 결과를 기록합니다.
   - project_name, iteration, metric_key, metric_value, improvement, summary를 전달합니다.
+  - summary에는 선택한 가설, 선택 이유, 판정 근거를 포함합니다.
   - git diff가 있으면 포함합니다.
 
   ### Phase Final: 종료 조건
@@ -130,6 +146,8 @@ instructions: |
   - 리팩토링보다 성능 개선에 집중합니다.
   - 각 iteration에서 하나의 명확한 변경만 합니다.
   - 절대 프로젝트 기능을 망가뜨리지 않습니다.
+  - 목표 metric과 무관한 변경은 하지 않습니다.
+  - 개선 여부가 애매하면 keep보다 revert를 우선합니다.
 
 activities:
   - "message: 🔬 **M3 Autoresearch Self-Optimize Loop**\n\n프로젝트를 지정하고 최적화 목표를 선택하세요.\nedit → benchmark → keep/revert를 최대 {{ max_iterations }}회 자동 반복합니다."
