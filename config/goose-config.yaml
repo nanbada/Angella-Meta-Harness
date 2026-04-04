@@ -1,0 +1,62 @@
+# ============================================================
+# Goose Config — M3 36GB Autoresearch Self-Optimize Loop
+# ============================================================
+# setup.sh가 이 템플릿을 현재 설치 경로 기준으로 렌더링합니다.
+# 직접 복사하지 말고 setup.sh를 통해 설치하세요.
+# ============================================================
+
+# --- Model Configuration (Lead/Worker Harness) ---
+GOOSE_PROVIDER: "ollama"
+GOOSE_MODEL: "qwen2.5-coder:32b"
+GOOSE_TEMPERATURE: 0.3
+
+# Lead Model (Intent Clarifier + Proposal Generator)
+GOOSE_LEAD_PROVIDER: "google"
+GOOSE_LEAD_MODEL: "gemini-2.5-pro"
+GOOSE_LEAD_TURNS: 3
+
+# --- Mode & Safety ---
+GOOSE_MODE: "smart_approve"
+GOOSE_TELEMETRY_ENABLED: false
+
+# --- Input Limit (MLX optimized context) ---
+GOOSE_INPUT_LIMIT: 16384
+
+# --- Recipe GitHub Repo (optional) ---
+# GOOSE_RECIPE_GITHUB_REPO: "your-org/goose-recipes"
+
+# --- Extensions ---
+extensions:
+  developer:
+    bundled: true
+    enabled: true
+    name: developer
+    type: builtin
+    timeout: 300
+
+  metric-benchmark:
+    enabled: true
+    name: metric-benchmark
+    type: stdio
+    cmd: __PYTHON_CMD__
+    args:
+      - "__ANGELLA_ROOT__/mcp-servers/metric_benchmark.py"
+    timeout: 300
+    description: "범용 벤치마크 실행 + objective metric 추출 (MLX 최적화)"
+
+  obsidian-auto-log:
+    enabled: true
+    name: obsidian-auto-log
+    type: stdio
+    cmd: __PYTHON_CMD__
+    args:
+      - "__ANGELLA_ROOT__/mcp-servers/obsidian_auto_log.py"
+    timeout: 300
+    description: "Autoresearch loop 결과를 Obsidian/로컬에 자동 로그 저장"
+
+# --- Slash Commands (optional) ---
+slash_commands:
+  - command: "autoresearch"
+    recipe_path: "__RENDERED_RECIPE_PATH__"
+  - command: "optimize-nextjs"
+    recipe_path: "__RENDERED_RECIPE_PATH__"

@@ -1,0 +1,83 @@
+version: "1.0.0"
+title: "Metric Evaluation Sub-Recipe"
+description: |
+  벤치마크를 실행하고 baseline과 비교하여 keep/revert를 판정합니다.
+  Autoresearch loop의 Step 3-5에 해당합니다.
+
+parameters:
+  - key: project_path
+    input_type: string
+    requirement: required
+    description: "프로젝트 경로"
+
+  - key: benchmark_command
+    input_type: string
+    requirement: required
+    description: "벤치마크 명령어"
+
+  - key: metric_key
+    input_type: string
+    requirement: required
+    description: "메트릭 키"
+
+  - key: baseline_value
+    input_type: number
+    requirement: required
+    description: "baseline 메트릭 값"
+
+  - key: threshold_percent
+    input_type: number
+    requirement: optional
+    default: "1.0"
+    description: "개선 판정 최소 비율 (%)"
+
+extensions:
+  - type: builtin
+    name: developer
+
+  - type: stdio
+    name: metric-benchmark
+    cmd: python
+    args:
+      - "/Users/nanbada/projects/Angella/mcp-servers/metric_benchmark.py"
+    timeout: 300
+
+instructions: |
+  당신은 벤치마크 평가자입니다. 코드 변경 후 메트릭을 측정하고 개선 여부를 판정합니다.
+
+  ## 작업 순서
+
+  ### 1. 벤치마크 실행
+  `run_benchmark` 도구를 호출합니다:
+  - command: "{{ benchmark_command }}"
+  - metric_key: "{{ metric_key }}"
+  - working_directory: "{{ project_path }}"
+
+  ### 2. 비교 판정
+  `compare_metrics` 도구를 호출합니다:
+  - baseline: {{ baseline_value }}
+  - current: (측정된 값)
+  - metric_key: "{{ metric_key }}"
+  - threshold_percent: {{ threshold_percent }}
+
+  ### 3. 결과에 따른 액션
+
+  #### ✅ 개선됨 (is_improved = true)
+  - "Ratchet forward: 개선 확인됨" 메시지를 출력합니다.
+  - 새 baseline 값을 반환합니다.
+
+  #### ❌ 개선 안됨 (is_improved = false)
+  - `git revert HEAD --no-edit`로 마지막 commit을 되돌립니다.
+  - "Reverted: 개선 없음" 메시지를 출력합니다.
+  - 이전 baseline 값을 그대로 반환합니다.
+
+  ### 4. 결과 반환
+  다음 형식으로 결과를 반환합니다:
+  ```
+  EVALUATION_RESULT:
+  - current_metric: <측정된 값>
+  - baseline: {{ baseline_value }}
+  - is_improved: <true/false>
+  - action_taken: <keep/revert>
+  - new_baseline: <새 baseline 또는 기존 baseline>
+  ```

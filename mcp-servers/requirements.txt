@@ -1,0 +1,4 @@
+# MCP Server Dependencies
+# Install: pip install -r mcp-servers/requirements.txt
+mcp>=1.0.0
+fastmcp>=0.1.0
