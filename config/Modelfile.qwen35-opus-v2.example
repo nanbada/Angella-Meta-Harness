@@ -1,0 +1,7 @@
+# Copy this file to `config/Modelfile.qwen35-opus-v2` for local use only.
+# Do not commit the non-example file because it should point at a machine-local model path.
+
+FROM /absolute/path/to/Qwen3.5-27B.Q4_K_M.gguf
+
+PARAMETER num_ctx 16384
+PARAMETER temperature 0.3

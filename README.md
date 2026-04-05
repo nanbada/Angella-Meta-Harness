@@ -57,10 +57,11 @@ bash setup.sh --yes
 ### 3. 환경 변수 적용
 
 ```bash
+cp .env.mlx.example .env.mlx
 source .env.mlx
 ```
 
-`.env.mlx`는 `ANGELLA_ROOT`와 `OBSIDIAN_VAULT_PATH`를 결정적으로 설정합니다. 별도 override가 없으면 로그는 Angella 설치 경로 하위 `logs/`에 저장됩니다.
+`.env.mlx.example`는 커밋되는 예시 파일이고, 실제 로컬 환경 파일은 `.env.mlx`로 두고 git에는 올리지 않습니다. 이 파일은 `ANGELLA_ROOT`와 `OBSIDIAN_VAULT_PATH`를 결정적으로 설정합니다. 별도 override가 없으면 로그는 Angella 설치 경로 하위 `logs/`에 저장됩니다.
 
 ### 4. Gemini credential 확인
 
@@ -178,7 +179,7 @@ goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s \
 ```text
 Angella/
 ├── setup.sh
-├── .env.mlx
+├── .env.mlx.example
 ├── .goosehints
 ├── config/
 │   ├── goose-config.yaml

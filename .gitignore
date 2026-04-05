@@ -4,3 +4,23 @@ __pycache__/
 
 logs/
 .config/
+
+# Local environment and secret material
+.env
+.env.*
+!.env.mlx.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+*.cer
+*.ovpn
+secrets.yaml
+
+# Local-only model files
+config/Modelfile.qwen35-opus-v2
+config/Modelfile.*.local
+
+# Local reference notes
+reference.md

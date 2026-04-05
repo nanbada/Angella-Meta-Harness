@@ -73,8 +73,8 @@ iteration별 metric, git diff, verdict를 남겨야 한다. 그래야 실패를 
   benchmark 실행과 metric 비교를 담당한다.
 - [`mcp-servers/obsidian_auto_log.py`](mcp-servers/obsidian_auto_log.py)
   iteration 로그와 최종 보고서를 저장한다.
-- [`.env.mlx`](.env.mlx)
-  MLX/Ollama/Goose 관련 환경 변수를 제공한다.
+- [`.env.mlx.example`](.env.mlx.example)
+  MLX/Ollama/Goose 관련 환경 변수 예시를 제공하고, 실제 `.env.mlx`는 로컬 전용으로 유지한다.
 
 현재 구현은 "Goose + Ollama + MCP" 경로에는 도달해 있다. 반면 `apfel`과 다중 provider routing은 아직 제품 설계상 후보이며, 실제 기본 경로는 아니다.
 

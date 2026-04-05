@@ -1,0 +1,11 @@
+# Local Reference Notes
+
+This file is the tracked example for a local-only `reference.md`.
+
+If you want to keep raw planning notes or source material that should not be committed:
+
+```bash
+cp reference.md.example reference.md
+```
+
+`reference.md` is ignored by git.

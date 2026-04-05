@@ -20,6 +20,8 @@ CHECK_RENDER_DIR=""
 OLLAMA_TAGS_JSON=""
 AUTO_YES=false
 CHECK_ONLY=false
+PYTHON_PIP_AVAILABLE=false
+ENV_MLX_PATH=""
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -125,6 +127,15 @@ detect_python() {
     return 1
 }
 
+resolve_env_mlx_path() {
+    if [ -f "$SCRIPT_DIR/.env.mlx" ]; then
+        ENV_MLX_PATH="$SCRIPT_DIR/.env.mlx"
+        return
+    fi
+
+    ENV_MLX_PATH="$SCRIPT_DIR/.env.mlx.example"
+}
+
 escape_sed_replacement() {
     local escaped=${1//\\/\\\\}
     escaped=${escaped//&/\\&}
@@ -182,12 +193,25 @@ render_and_verify() {
 
 install_python_requirements() {
     local requirements_file=$1
+    local required_packages=("mcp" "fastmcp")
+    local spec_probe='import importlib.util, sys;'
+    local package_name
 
-    if ! "$PYTHON_CMD" -m pip --version >/dev/null 2>&1; then
+    if [ "$PYTHON_PIP_AVAILABLE" != true ] && ! "$PYTHON_CMD" -m pip --version >/dev/null 2>&1; then
         warn "pip is not available for $PYTHON_CMD. Install Python dependencies manually:"
         echo "  $PYTHON_CMD -m ensurepip --upgrade"
         echo "  $PYTHON_CMD -m pip install mcp fastmcp"
         return 1
+    fi
+
+    for package_name in "${required_packages[@]}"; do
+        spec_probe+="sys.exit(1) if importlib.util.find_spec(\"${package_name}\") is None else None;"
+    done
+    spec_probe+="sys.exit(0)"
+
+    if "$PYTHON_CMD" -c "$spec_probe" >/dev/null 2>&1; then
+        info "Python requirements already installed; skipping pip install."
+        return 0
     fi
 
     if "$PYTHON_CMD" -m pip install -r "$requirements_file" --quiet 2>/dev/null; then
@@ -222,7 +246,7 @@ check_homebrew() {
 ensure_goose() {
     info "Checking Goose CLI..."
     if command -v goose >/dev/null 2>&1; then
-        ok "Goose CLI found: $(goose --version 2>/dev/null || echo 'version unknown')"
+        ok "Goose CLI found"
         return
     fi
 
@@ -247,11 +271,9 @@ ensure_goose() {
 }
 
 check_ollama_binary() {
-    local ollama_version
     info "Checking Ollama..."
     if command -v ollama >/dev/null 2>&1; then
-        ollama_version="$(ollama --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | tail -n 1)"
-        ok "Ollama found: ${ollama_version:-installed}"
+        ok "Ollama found"
     else
         fail "Ollama not found. Install from https://ollama.com"
         exit 1
@@ -354,6 +376,7 @@ detect_python_runtime() {
 check_python_requirements_support() {
     info "Checking pip availability for MCP servers..."
     if "$PYTHON_CMD" -c "import pip" >/dev/null 2>&1; then
+        PYTHON_PIP_AVAILABLE=true
         ok "pip is available for $PYTHON_CMD"
     else
         fail "pip is not available for $PYTHON_CMD"
@@ -443,6 +466,7 @@ print_summary() {
     echo "  Next steps:"
     echo ""
     echo "  1. 환경변수 적용:"
+    echo "     cp $SCRIPT_DIR/.env.mlx.example $SCRIPT_DIR/.env.mlx"
     echo "     source $SCRIPT_DIR/.env.mlx"
     echo ""
     echo "  2. Angella recipe 실행:"
@@ -458,6 +482,7 @@ print_summary() {
 
 parse_args "$@"
 print_banner
+resolve_env_mlx_path
 
 check_homebrew
 ensure_goose
@@ -483,7 +508,7 @@ fi
 
 info "Loading MLX environment variables..."
 # shellcheck source=/dev/null
-source "$SCRIPT_DIR/.env.mlx"
+source "$ENV_MLX_PATH"
 ok "Environment variables loaded"
 
 install_templates

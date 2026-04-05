@@ -1,0 +1,30 @@
+name: Repo Checks
+
+on:
+  push:
+    branches:
+      - main
+      - codex/**
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Make Scripts Executable
+        run: chmod +x scripts/*.sh .githooks/pre-commit
+
+      - name: Secret Scan
+        run: bash scripts/check-secrets.sh
+
+      - name: Shell Syntax
+        run: bash -n setup.sh
+
+      - name: Python Syntax
+        run: python3 -m py_compile mcp-servers/common.py mcp-servers/metric_benchmark.py mcp-servers/metric_benchmark_nextjs.py mcp-servers/metric_benchmark_python.py mcp-servers/metric_benchmark_swift.py mcp-servers/obsidian_auto_log.py
+
+      - name: Setup Flow Tests
+        run: bash scripts/test_setup_flows.sh
