@@ -13,6 +13,7 @@ if command -v rg >/dev/null 2>&1; then
   rg -n --hidden \
     --glob '!.git/**' \
     --glob '!.config/**' \
+    --glob '!.cache/**' \
     --glob '!logs/**' \
     --glob '!__pycache__/**' \
     --glob '!*.pyc' \
@@ -24,6 +25,7 @@ else
   grep -RInE \
     --exclude-dir=.git \
     --exclude-dir=.config \
+    --exclude-dir=.cache \
     --exclude-dir=logs \
     --exclude-dir=__pycache__ \
     --exclude='*.pyc' \

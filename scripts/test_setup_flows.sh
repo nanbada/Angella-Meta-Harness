@@ -88,6 +88,13 @@ INSTALL_HOME="$TMP_ROOT/home-install"
 mkdir -p "$CHECK_HOME" "$YES_HOME" "$BOOTSTRAP_HOME" "$INSTALL_HOME"
 
 export PATH="$FAKE_BIN:$PATH"
+GOOGLE_KEY_NAME="GOOGLE_API_KEY"
+OPENAI_KEY_NAME="OPENAI_API_KEY"
+ANTHROPIC_KEY_NAME="ANTHROPIC_API_KEY"
+export "$GOOGLE_KEY_NAME"="test-google-key"
+export "$OPENAI_KEY_NAME"="test-openai-key"
+export "$ANTHROPIC_KEY_NAME"="test-anthropic-key"
+export ANGELLA_OLLAMA_TAGS_JSON='{"models":[{"name":"qwen2.5-coder:32b"},{"name":"gemma4:26b"}]}'
 
 CHECK_OUT="$TMP_ROOT/check.out"
 CHECK_ERR="$TMP_ROOT/check.err"
@@ -99,7 +106,21 @@ CHECK_ERR="$TMP_ROOT/check.err"
 
 grep -q "Template rendering checks passed" "$CHECK_OUT"
 grep -q "Model 'qwen2.5-coder:32b' already pulled" "$CHECK_OUT"
-grep -q "Model 'gemma4:26b' already pulled" "$CHECK_OUT"
+
+MODELS_OUT="$TMP_ROOT/models.out"
+(
+  cd "$ROOT_DIR"
+  HOME="$CHECK_HOME" bash setup.sh --list-models >"$MODELS_OUT" 2>/dev/null
+)
+grep -q "google_gemini_2_5_pro" "$MODELS_OUT"
+grep -q "ollama_qwen25_coder_32b" "$MODELS_OUT"
+
+PROFILES_OUT="$TMP_ROOT/profiles.out"
+(
+  cd "$ROOT_DIR"
+  HOME="$CHECK_HOME" bash setup.sh --list-harness-profiles >"$PROFILES_OUT" 2>/dev/null
+)
+grep -q "default:" "$PROFILES_OUT"
 
 BOOTSTRAP_OUT="$TMP_ROOT/bootstrap.out"
 BOOTSTRAP_ERR="$TMP_ROOT/bootstrap.err"
@@ -111,6 +132,7 @@ BOOTSTRAP_ERR="$TMP_ROOT/bootstrap.err"
 
 test -f "$ROOT_DIR/.cache/angella/bootstrap.env"
 test -f "$ROOT_DIR/.cache/angella/bootstrap-venv/bin/python"
+grep -q "ANGELLA_HARNESS_PROFILE_ID=.*default" "$ROOT_DIR/.cache/angella/bootstrap.env"
 grep -q "Bootstrap Complete" "$BOOTSTRAP_OUT"
 
 INSTALL_OUT="$TMP_ROOT/install.out"
@@ -130,14 +152,26 @@ YES_ERR="$TMP_ROOT/yes.err"
 
 (
   cd "$ROOT_DIR"
-  HOME="$YES_HOME" bash setup.sh --yes >"$YES_OUT" 2>"$YES_ERR"
+  HOME="$YES_HOME" bash setup.sh \
+    --harness-profile default \
+    --lead-model openai_gpt_5_2_pro \
+    --planner-model anthropic_claude_sonnet_4 \
+    --worker-model ollama_qwen25_coder_32b \
+    --yes >"$YES_OUT" 2>"$YES_ERR"
 )
 
 test -f "$YES_HOME/.config/goose/config.yaml"
 test -f "$YES_HOME/.config/goose/recipes/autoresearch-loop.yaml"
 test -f "$YES_HOME/.config/goose/recipes/sub/code-optimize.yaml"
 test -f "$YES_HOME/.config/goose/recipes/sub/evaluate-metric.yaml"
+grep -q 'GOOSE_LEAD_PROVIDER: "openai"' "$YES_HOME/.config/goose/config.yaml"
+grep -q 'GOOSE_LEAD_MODEL: "gpt-5.2-pro"' "$YES_HOME/.config/goose/config.yaml"
+grep -q 'GOOSE_PLANNER_PROVIDER: "anthropic"' "$YES_HOME/.config/goose/config.yaml"
+grep -q 'GOOSE_PLANNER_MODEL: "claude-sonnet-4-20250514"' "$YES_HOME/.config/goose/config.yaml"
+grep -q 'GOOSE_PROVIDER: "ollama"' "$YES_HOME/.config/goose/config.yaml"
+grep -q 'GOOSE_MODEL: "qwen2.5-coder:32b"' "$YES_HOME/.config/goose/config.yaml"
 test -d "$ROOT_DIR/logs/Goose Logs"
+test -f "$ROOT_DIR/.cache/angella/control-plane/current-selection.json"
 
 if command -v rg >/dev/null 2>&1; then
   ! rg -q '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__' "$YES_HOME/.config/goose"

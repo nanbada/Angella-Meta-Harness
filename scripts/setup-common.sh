@@ -19,6 +19,17 @@ ANGELLA_BOOTSTRAP_STATE_PATH="${ANGELLA_BOOTSTRAP_STATE_PATH:-${ANGELLA_CACHE_DI
 ANGELLA_PIP_CACHE_DIR="${ANGELLA_PIP_CACHE_DIR:-${ANGELLA_CACHE_DIR}/pip}"
 ANGELLA_UV_CACHE_DIR="${ANGELLA_UV_CACHE_DIR:-${ANGELLA_CACHE_DIR}/uv}"
 ANGELLA_WHEELHOUSE_DIR="${ANGELLA_WHEELHOUSE_DIR:-${SCRIPT_DIR}/vendor/wheels}"
+ANGELLA_CONTROL_PLANE_DIR="${ANGELLA_CONTROL_PLANE_DIR:-${ANGELLA_CACHE_DIR}/control-plane}"
+ANGELLA_CONTROL_RUNS_DIR="${ANGELLA_CONTROL_RUNS_DIR:-${ANGELLA_CONTROL_PLANE_DIR}/runs}"
+ANGELLA_CONTROL_FAILURES_OPEN_DIR="${ANGELLA_CONTROL_FAILURES_OPEN_DIR:-${ANGELLA_CONTROL_PLANE_DIR}/failures/open}"
+ANGELLA_CONTROL_FAILURES_CLOSED_DIR="${ANGELLA_CONTROL_FAILURES_CLOSED_DIR:-${ANGELLA_CONTROL_PLANE_DIR}/failures/closed}"
+ANGELLA_CONTROL_KNOWLEDGE_SOPS_DIR="${ANGELLA_CONTROL_KNOWLEDGE_SOPS_DIR:-${ANGELLA_CONTROL_PLANE_DIR}/knowledge/sops}"
+ANGELLA_CONTROL_KNOWLEDGE_SKILLS_DIR="${ANGELLA_CONTROL_KNOWLEDGE_SKILLS_DIR:-${ANGELLA_CONTROL_PLANE_DIR}/knowledge/skills}"
+ANGELLA_CONTROL_META_LOOP_DIR="${ANGELLA_CONTROL_META_LOOP_DIR:-${ANGELLA_CONTROL_PLANE_DIR}/queue/meta-loop}"
+ANGELLA_CUSTOM_PROVIDER_DIR="${ANGELLA_CUSTOM_PROVIDER_DIR:-${GOOSE_CONFIG_DIR}/custom_providers}"
+ANGELLA_HARNESS_MODELS_PATH="${ANGELLA_HARNESS_MODELS_PATH:-${SCRIPT_DIR}/config/harness-models.yaml}"
+ANGELLA_HARNESS_PROFILES_PATH="${ANGELLA_HARNESS_PROFILES_PATH:-${SCRIPT_DIR}/config/harness-profiles.yaml}"
+ANGELLA_APFEL_TEMPLATE_PATH="${ANGELLA_APFEL_TEMPLATE_PATH:-${SCRIPT_DIR}/config/custom-providers/apfel-local.json.template}"
 
 CHECK_RENDER_DIR="${CHECK_RENDER_DIR:-}"
 OLLAMA_TAGS_JSON="${OLLAMA_TAGS_JSON:-}"
@@ -26,9 +37,36 @@ AUTO_YES="${AUTO_YES:-false}"
 CHECK_ONLY="${CHECK_ONLY:-false}"
 BOOTSTRAP_ONLY="${BOOTSTRAP_ONLY:-false}"
 INSTALL_ONLY="${INSTALL_ONLY:-false}"
+LIST_MODELS="${LIST_MODELS:-false}"
+LIST_HARNESS_PROFILES="${LIST_HARNESS_PROFILES:-false}"
 PYTHON_PIP_AVAILABLE="${PYTHON_PIP_AVAILABLE:-false}"
 ENV_MLX_PATH="${ENV_MLX_PATH:-}"
 PYTHON_CMD="${PYTHON_CMD:-}"
+HARNESS_PROFILE="${HARNESS_PROFILE:-}"
+LEAD_MODEL_OVERRIDE="${LEAD_MODEL_OVERRIDE:-}"
+PLANNER_MODEL_OVERRIDE="${PLANNER_MODEL_OVERRIDE:-}"
+WORKER_MODEL_OVERRIDE="${WORKER_MODEL_OVERRIDE:-}"
+ANGELLA_HARNESS_PROFILE_ID="${ANGELLA_HARNESS_PROFILE_ID:-}"
+ANGELLA_LEAD_MODEL_ID="${ANGELLA_LEAD_MODEL_ID:-}"
+ANGELLA_PLANNER_MODEL_ID="${ANGELLA_PLANNER_MODEL_ID:-}"
+ANGELLA_WORKER_MODEL_ID="${ANGELLA_WORKER_MODEL_ID:-}"
+ANGELLA_LEAD_PROVIDER="${ANGELLA_LEAD_PROVIDER:-}"
+ANGELLA_LEAD_MODEL="${ANGELLA_LEAD_MODEL:-}"
+ANGELLA_LEAD_CONTEXT_LIMIT="${ANGELLA_LEAD_CONTEXT_LIMIT:-}"
+ANGELLA_LEAD_TEMPERATURE="${ANGELLA_LEAD_TEMPERATURE:-}"
+ANGELLA_PLANNER_PROVIDER="${ANGELLA_PLANNER_PROVIDER:-}"
+ANGELLA_PLANNER_MODEL="${ANGELLA_PLANNER_MODEL:-}"
+ANGELLA_PLANNER_CONTEXT_LIMIT="${ANGELLA_PLANNER_CONTEXT_LIMIT:-}"
+ANGELLA_PLANNER_TEMPERATURE="${ANGELLA_PLANNER_TEMPERATURE:-}"
+ANGELLA_WORKER_PROVIDER="${ANGELLA_WORKER_PROVIDER:-}"
+ANGELLA_WORKER_MODEL="${ANGELLA_WORKER_MODEL:-}"
+ANGELLA_WORKER_CONTEXT_LIMIT="${ANGELLA_WORKER_CONTEXT_LIMIT:-}"
+ANGELLA_WORKER_TEMPERATURE="${ANGELLA_WORKER_TEMPERATURE:-}"
+ANGELLA_MLX_PREVIEW_ENABLED="${ANGELLA_MLX_PREVIEW_ENABLED:-false}"
+ANGELLA_NVFP4_ENABLED="${ANGELLA_NVFP4_ENABLED:-false}"
+ANGELLA_APFEL_ENABLED="${ANGELLA_APFEL_ENABLED:-false}"
+ANGELLA_NON_GOALS_JSON="${ANGELLA_NON_GOALS_JSON:-[]}"
+ANGELLA_MLX_POLICY_JSON="${ANGELLA_MLX_POLICY_JSON:-{}}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -114,22 +152,55 @@ escape_sed_replacement() {
     printf '%s' "$escaped"
 }
 
+write_shell_var() {
+    local name=$1
+    local value=$2
+    printf "%s=%q\n" "$name" "$value"
+}
+
 render_template() {
     local template_path=$1
     local output_path=$2
     local escaped_root
     local escaped_python
     local escaped_recipe_path
+    local escaped_goose_provider
+    local escaped_goose_model
+    local escaped_goose_temperature
+    local escaped_goose_lead_provider
+    local escaped_goose_lead_model
+    local escaped_goose_planner_provider
+    local escaped_goose_planner_model
+    local escaped_goose_input_limit
+    local escaped_harness_profile
 
     escaped_root="$(escape_sed_replacement "$SCRIPT_DIR")"
     escaped_python="$(escape_sed_replacement "$PYTHON_CMD")"
     escaped_recipe_path="$(escape_sed_replacement "$RENDERED_RECIPE_PATH")"
+    escaped_goose_provider="$(escape_sed_replacement "${ANGELLA_WORKER_PROVIDER:-ollama}")"
+    escaped_goose_model="$(escape_sed_replacement "${ANGELLA_WORKER_MODEL:-qwen2.5-coder:32b}")"
+    escaped_goose_temperature="$(escape_sed_replacement "${ANGELLA_WORKER_TEMPERATURE:-0.3}")"
+    escaped_goose_lead_provider="$(escape_sed_replacement "${ANGELLA_LEAD_PROVIDER:-google}")"
+    escaped_goose_lead_model="$(escape_sed_replacement "${ANGELLA_LEAD_MODEL:-gemini-2.5-pro}")"
+    escaped_goose_planner_provider="$(escape_sed_replacement "${ANGELLA_PLANNER_PROVIDER:-${ANGELLA_LEAD_PROVIDER:-google}}")"
+    escaped_goose_planner_model="$(escape_sed_replacement "${ANGELLA_PLANNER_MODEL:-${ANGELLA_LEAD_MODEL:-gemini-2.5-pro}}")"
+    escaped_goose_input_limit="$(escape_sed_replacement "${ANGELLA_WORKER_CONTEXT_LIMIT:-16384}")"
+    escaped_harness_profile="$(escape_sed_replacement "${ANGELLA_HARNESS_PROFILE_ID:-default}")"
 
     mkdir -p "$(dirname "$output_path")"
     sed \
         -e "s|__ANGELLA_ROOT__|$escaped_root|g" \
         -e "s|__PYTHON_CMD__|$escaped_python|g" \
         -e "s|__RENDERED_RECIPE_PATH__|$escaped_recipe_path|g" \
+        -e "s|__GOOSE_PROVIDER__|$escaped_goose_provider|g" \
+        -e "s|__GOOSE_MODEL__|$escaped_goose_model|g" \
+        -e "s|__GOOSE_TEMPERATURE__|$escaped_goose_temperature|g" \
+        -e "s|__GOOSE_LEAD_PROVIDER__|$escaped_goose_lead_provider|g" \
+        -e "s|__GOOSE_LEAD_MODEL__|$escaped_goose_lead_model|g" \
+        -e "s|__GOOSE_PLANNER_PROVIDER__|$escaped_goose_planner_provider|g" \
+        -e "s|__GOOSE_PLANNER_MODEL__|$escaped_goose_planner_model|g" \
+        -e "s|__GOOSE_INPUT_LIMIT__|$escaped_goose_input_limit|g" \
+        -e "s|__ANGELLA_HARNESS_PROFILE_ID__|$escaped_harness_profile|g" \
         "$template_path" > "$output_path"
 }
 
@@ -162,15 +233,105 @@ render_and_verify() {
     verify_rendered_template "$output_path"
 }
 
+list_harness_models() {
+    "$PYTHON_CMD" "$SCRIPT_DIR/scripts/harness_catalog.py" list-models
+}
+
+list_harness_profiles() {
+    "$PYTHON_CMD" "$SCRIPT_DIR/scripts/harness_catalog.py" list-profiles
+}
+
+resolve_harness_selection() {
+    local output
+    local args=("$PYTHON_CMD" "$SCRIPT_DIR/scripts/harness_catalog.py" "resolve" "--format" "shell")
+
+    if [ -n "$HARNESS_PROFILE" ]; then
+        args+=("--profile" "$HARNESS_PROFILE")
+    fi
+    if [ -n "$LEAD_MODEL_OVERRIDE" ]; then
+        args+=("--lead-model" "$LEAD_MODEL_OVERRIDE")
+    fi
+    if [ -n "$PLANNER_MODEL_OVERRIDE" ]; then
+        args+=("--planner-model" "$PLANNER_MODEL_OVERRIDE")
+    fi
+    if [ -n "$WORKER_MODEL_OVERRIDE" ]; then
+        args+=("--worker-model" "$WORKER_MODEL_OVERRIDE")
+    fi
+
+    output="$("${args[@]}")"
+
+    # shellcheck disable=SC1090
+    eval "$output"
+}
+
+create_control_plane_layout() {
+    mkdir -p \
+        "$ANGELLA_CONTROL_RUNS_DIR" \
+        "$ANGELLA_CONTROL_FAILURES_OPEN_DIR" \
+        "$ANGELLA_CONTROL_FAILURES_CLOSED_DIR" \
+        "$ANGELLA_CONTROL_KNOWLEDGE_SOPS_DIR" \
+        "$ANGELLA_CONTROL_KNOWLEDGE_SKILLS_DIR" \
+        "$ANGELLA_CONTROL_META_LOOP_DIR"
+}
+
+write_harness_resolution_snapshot() {
+    local snapshot_path="${ANGELLA_CONTROL_PLANE_DIR}/current-selection.json"
+
+    create_control_plane_layout
+
+    cat >"$snapshot_path" <<EOF
+{
+  "profile_id": $(printf '%s' "$ANGELLA_HARNESS_PROFILE_ID" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "lead_model_id": $(printf '%s' "$ANGELLA_LEAD_MODEL_ID" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "planner_model_id": $(printf '%s' "$ANGELLA_PLANNER_MODEL_ID" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "worker_model_id": $(printf '%s' "$ANGELLA_WORKER_MODEL_ID" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "lead_provider": $(printf '%s' "$ANGELLA_LEAD_PROVIDER" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "lead_model": $(printf '%s' "$ANGELLA_LEAD_MODEL" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "planner_provider": $(printf '%s' "$ANGELLA_PLANNER_PROVIDER" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "planner_model": $(printf '%s' "$ANGELLA_PLANNER_MODEL" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "worker_provider": $(printf '%s' "$ANGELLA_WORKER_PROVIDER" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "worker_model": $(printf '%s' "$ANGELLA_WORKER_MODEL" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "worker_context_limit": $(printf '%s' "$ANGELLA_WORKER_CONTEXT_LIMIT"),
+  "worker_temperature": $(printf '%s' "$ANGELLA_WORKER_TEMPERATURE"),
+  "mlx_preview_enabled": $(printf '%s' "$ANGELLA_MLX_PREVIEW_ENABLED"),
+  "nvfp4_enabled": $(printf '%s' "$ANGELLA_NVFP4_ENABLED"),
+  "apfel_enabled": $(printf '%s' "$ANGELLA_APFEL_ENABLED"),
+  "non_goals": ${ANGELLA_NON_GOALS_JSON},
+  "mlx_policy": ${ANGELLA_MLX_POLICY_JSON}
+}
+EOF
+}
+
 bootstrap_state_exists() {
     [ -f "$ANGELLA_BOOTSTRAP_STATE_PATH" ]
 }
 
 write_bootstrap_state() {
     mkdir -p "$(dirname "$ANGELLA_BOOTSTRAP_STATE_PATH")"
-    cat >"$ANGELLA_BOOTSTRAP_STATE_PATH" <<EOF
-PYTHON_CMD=$(printf '%q' "$PYTHON_CMD")
-EOF
+    {
+        write_shell_var "PYTHON_CMD" "$PYTHON_CMD"
+        write_shell_var "ANGELLA_HARNESS_PROFILE_ID" "$ANGELLA_HARNESS_PROFILE_ID"
+        write_shell_var "ANGELLA_LEAD_MODEL_ID" "$ANGELLA_LEAD_MODEL_ID"
+        write_shell_var "ANGELLA_PLANNER_MODEL_ID" "$ANGELLA_PLANNER_MODEL_ID"
+        write_shell_var "ANGELLA_WORKER_MODEL_ID" "$ANGELLA_WORKER_MODEL_ID"
+        write_shell_var "ANGELLA_LEAD_PROVIDER" "$ANGELLA_LEAD_PROVIDER"
+        write_shell_var "ANGELLA_LEAD_MODEL" "$ANGELLA_LEAD_MODEL"
+        write_shell_var "ANGELLA_LEAD_CONTEXT_LIMIT" "$ANGELLA_LEAD_CONTEXT_LIMIT"
+        write_shell_var "ANGELLA_LEAD_TEMPERATURE" "$ANGELLA_LEAD_TEMPERATURE"
+        write_shell_var "ANGELLA_PLANNER_PROVIDER" "$ANGELLA_PLANNER_PROVIDER"
+        write_shell_var "ANGELLA_PLANNER_MODEL" "$ANGELLA_PLANNER_MODEL"
+        write_shell_var "ANGELLA_PLANNER_CONTEXT_LIMIT" "$ANGELLA_PLANNER_CONTEXT_LIMIT"
+        write_shell_var "ANGELLA_PLANNER_TEMPERATURE" "$ANGELLA_PLANNER_TEMPERATURE"
+        write_shell_var "ANGELLA_WORKER_PROVIDER" "$ANGELLA_WORKER_PROVIDER"
+        write_shell_var "ANGELLA_WORKER_MODEL" "$ANGELLA_WORKER_MODEL"
+        write_shell_var "ANGELLA_WORKER_CONTEXT_LIMIT" "$ANGELLA_WORKER_CONTEXT_LIMIT"
+        write_shell_var "ANGELLA_WORKER_TEMPERATURE" "$ANGELLA_WORKER_TEMPERATURE"
+        write_shell_var "ANGELLA_MLX_PREVIEW_ENABLED" "$ANGELLA_MLX_PREVIEW_ENABLED"
+        write_shell_var "ANGELLA_NVFP4_ENABLED" "$ANGELLA_NVFP4_ENABLED"
+        write_shell_var "ANGELLA_APFEL_ENABLED" "$ANGELLA_APFEL_ENABLED"
+        write_shell_var "ANGELLA_NON_GOALS_JSON" "$ANGELLA_NON_GOALS_JSON"
+        write_shell_var "ANGELLA_MLX_POLICY_JSON" "$ANGELLA_MLX_POLICY_JSON"
+    } >"$ANGELLA_BOOTSTRAP_STATE_PATH"
 }
 
 load_bootstrap_state() {
@@ -271,6 +432,30 @@ ensure_bootstrap_environment() {
     info "Bootstrapping Python environment..."
     install_python_requirements "$SCRIPT_DIR/mcp-servers/requirements.txt"
     write_bootstrap_state
+}
+
+render_apfel_custom_provider() {
+    local target_path="${ANGELLA_CUSTOM_PROVIDER_DIR}/angella_apfel_local.json"
+    local base_url="${ANGELLA_APFEL_BASE_URL:-}"
+    local model_name="${ANGELLA_APFEL_MODEL:-apple-foundationmodel}"
+
+    if [ -z "$base_url" ]; then
+        return 0
+    fi
+
+    mkdir -p "$ANGELLA_CUSTOM_PROVIDER_DIR"
+    sed \
+        -e "s|__ANGELLA_APFEL_BASE_URL__|$(escape_sed_replacement "$base_url")|g" \
+        -e "s|__ANGELLA_APFEL_MODEL__|$(escape_sed_replacement "$model_name")|g" \
+        "$ANGELLA_APFEL_TEMPLATE_PATH" >"$target_path"
+}
+
+ensure_selected_worker_runtime() {
+    if [ "$ANGELLA_WORKER_PROVIDER" = "ollama" ]; then
+        pull_model "$ANGELLA_WORKER_MODEL"
+    elif [ "$ANGELLA_WORKER_PROVIDER" = "angella_apfel_local" ]; then
+        render_apfel_custom_provider
+    fi
 }
 
 check_homebrew() {
@@ -375,32 +560,33 @@ pull_model() {
 }
 
 ensure_models() {
-    info "Checking required Ollama models..."
-    if ! ollama_is_running; then
-        warn "Ollama server is not running. Skipping model pull."
-        echo "  Run manually later:"
-        echo "    ollama pull qwen2.5-coder:32b"
-        echo "    ollama pull gemma4:26b"
-        return
-    fi
+    info "Checking selected worker runtime..."
 
-    if [ "$CHECK_ONLY" = true ]; then
-        if ollama_has_model "qwen2.5-coder:32b"; then
-            ok "Model 'qwen2.5-coder:32b' already pulled"
-        else
-            warn "Model 'qwen2.5-coder:32b' is not pulled yet."
+    if [ "$ANGELLA_WORKER_PROVIDER" = "ollama" ]; then
+        if ! ollama_is_running; then
+            warn "Ollama server is not running. Skipping model pull."
+            echo "  Run manually later:"
+            echo "    ollama pull $ANGELLA_WORKER_MODEL"
+            return
         fi
 
-        if ollama_has_model "gemma4:26b"; then
-            ok "Model 'gemma4:26b' already pulled"
-        else
-            warn "Model 'gemma4:26b' is not pulled yet."
+        if [ "$CHECK_ONLY" = true ]; then
+            if ollama_has_model "$ANGELLA_WORKER_MODEL"; then
+                ok "Model '$ANGELLA_WORKER_MODEL' already pulled"
+            else
+                warn "Model '$ANGELLA_WORKER_MODEL' is not pulled yet."
+            fi
+            return
         fi
-        return
-    fi
 
-    pull_model "qwen2.5-coder:32b"
-    pull_model "gemma4:26b"
+        pull_model "$ANGELLA_WORKER_MODEL"
+    elif [ "$ANGELLA_WORKER_PROVIDER" = "angella_apfel_local" ]; then
+        if [ "$ANGELLA_APFEL_ENABLED" = "true" ]; then
+            ok "apfel custom provider is enabled"
+        else
+            warn "apfel worker selected but provider is not currently enabled."
+        fi
+    fi
 }
 
 detect_python_runtime() {
@@ -486,14 +672,45 @@ install_templates() {
     ok "Rendered sub-recipes installed to $RENDERED_SUB_RECIPE_DIR"
 }
 
-report_google_api_key_status() {
-    if [ -n "${GOOGLE_API_KEY:-}" ]; then
-        ok "GOOGLE_API_KEY is already set"
-    else
-        warn "GOOGLE_API_KEY is not set. Goose lead model will need it at runtime."
+report_harness_credential_status() {
+    local env_name
+    local missing=0
+
+    for env_name in GOOGLE_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY; do
+        if [ -n "${!env_name:-}" ]; then
+            ok "$env_name is set"
+        fi
+    done
+
+    case "$ANGELLA_LEAD_PROVIDER" in
+        google)
+            [ -n "${GOOGLE_API_KEY:-}" ] || missing=1
+            ;;
+        openai)
+            [ -n "${OPENAI_API_KEY:-}" ] || missing=1
+            ;;
+        anthropic)
+            [ -n "${ANTHROPIC_API_KEY:-}" ] || missing=1
+            ;;
+    esac
+
+    case "$ANGELLA_PLANNER_PROVIDER" in
+        google)
+            [ -n "${GOOGLE_API_KEY:-}" ] || missing=1
+            ;;
+        openai)
+            [ -n "${OPENAI_API_KEY:-}" ] || missing=1
+            ;;
+        anthropic)
+            [ -n "${ANTHROPIC_API_KEY:-}" ] || missing=1
+            ;;
+    esac
+
+    if [ "$missing" -eq 1 ]; then
+        warn "One or more selected lead/planner credentials are missing."
         echo "  Configure later with:"
         echo "    goose configure"
-        echo "  Or export it in your shell before running the recipe."
+        echo "  Or export the provider API key before running the recipe."
     fi
 }
 
@@ -523,6 +740,12 @@ print_summary() {
     echo "  1. 환경변수 적용:"
     echo "     cp $SCRIPT_DIR/.env.mlx.example $SCRIPT_DIR/.env.mlx"
     echo "     source $SCRIPT_DIR/.env.mlx"
+    echo ""
+    echo "  Harness:"
+    echo "     profile: ${ANGELLA_HARNESS_PROFILE_ID:-default}"
+    echo "     lead: ${ANGELLA_LEAD_PROVIDER:-google}/${ANGELLA_LEAD_MODEL:-gemini-2.5-pro}"
+    echo "     planner: ${ANGELLA_PLANNER_PROVIDER:-google}/${ANGELLA_PLANNER_MODEL:-gemini-2.5-pro}"
+    echo "     worker: ${ANGELLA_WORKER_PROVIDER:-ollama}/${ANGELLA_WORKER_MODEL:-qwen2.5-coder:32b}"
     echo ""
 
     if [ "$BOOTSTRAP_ONLY" = true ]; then

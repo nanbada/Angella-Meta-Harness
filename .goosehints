@@ -3,14 +3,15 @@
 
 이 프로젝트는 MacBook Pro M3 36GB에서 Goose AI Agent의
 Autoresearch Self-Optimize Loop를 구현합니다.
-공식 v1 기본 flow는 `recipes/autoresearch-loop.yaml` 하나입니다.
-선택형 adapter는 같은 benchmark payload 계약을 만족하는 대체 backend입니다.
+공식 기본 flow는 `recipes/autoresearch-loop.yaml` 하나이지만,
+harness 자체는 lead/planner/worker를 catalog/selector로 해상하는 adaptive 구조입니다.
 
 ## 프로젝트 구조
 - `recipes/` — Goose recipe YAML 파일들
 - `mcp-servers/` — Python MCP 서버들 (metric benchmark, obsidian logger)
-- `config/` — Goose config 템플릿
+- `config/` — Goose config 템플릿 + harness catalog/profile
 - `.env.mlx.example` — 커밋되는 MLX 환경변수 예시
+- `knowledge/` — reusable SOP/skill 자산
 
 ## MCP 서버
 모든 MCP 서버는 Python의 `mcp` 패키지를 사용하며 stdio 방식으로 통신합니다.
@@ -32,6 +33,7 @@ Benchmark 계층의 핵심 출력 계약:
 
 ## 레시피
 - `autoresearch-loop.yaml` — 메인 Autoresearch ratchet loop
+- `harness-self-optimize.yaml` — harness 자체를 개선하는 meta-loop
 - `sub/code-optimize.yaml` — 선택형 adapter용 구현 보조 블록
 - `sub/evaluate-metric.yaml` — 선택형 adapter용 benchmark 보조 블록
 
@@ -42,6 +44,7 @@ Benchmark 계층의 핵심 출력 계약:
 - keep/revert/failure를 모두 `run_id` 기준 로그에 기록
 
 ## 환경
-- Ollama MLX 백엔드 (qwen2.5-coder:32b, gemma4:26b)
-- Gemini 2.5 Pro (Lead model)
+- Ollama MLX 백엔드 (qwen2.5-coder:32b, gemma4:26b, optional preview worker)
+- frontier lead/planner catalog (Google, Anthropic, OpenAI)
+- optional apfel custom provider worker
 - M3 36GB unified memory — 28GB 이하 유지 권장

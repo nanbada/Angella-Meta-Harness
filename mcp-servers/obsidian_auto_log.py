@@ -18,6 +18,7 @@ from mcp.server.stdio import stdio_server
 server = Server("obsidian-auto-log")
 ANGELLA_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_VAULT_PATH = os.path.join(ANGELLA_ROOT, "logs")
+DEFAULT_CONTROL_PLANE_PATH = os.path.join(ANGELLA_ROOT, ".cache", "angella", "control-plane")
 
 
 def _resolve_vault_path() -> str:
@@ -29,6 +30,41 @@ def _get_log_dir() -> str:
     log_dir = os.path.join(_resolve_vault_path(), "Goose Logs")
     os.makedirs(log_dir, exist_ok=True)
     return log_dir
+
+
+def _resolve_control_plane_path() -> str:
+    configured = os.environ.get("ANGELLA_CONTROL_PLANE_DIR") or DEFAULT_CONTROL_PLANE_PATH
+    return os.path.abspath(os.path.expanduser(configured))
+
+
+def _ensure_control_plane_layout() -> dict[str, str]:
+    root = _resolve_control_plane_path()
+    paths = {
+        "root": root,
+        "runs": os.path.join(root, "runs"),
+        "failures_open": os.path.join(root, "failures", "open"),
+        "failures_closed": os.path.join(root, "failures", "closed"),
+        "knowledge_sops": os.path.join(root, "knowledge", "sops"),
+        "knowledge_skills": os.path.join(root, "knowledge", "skills"),
+        "meta_loop": os.path.join(root, "queue", "meta-loop"),
+    }
+    for path in paths.values():
+        if path != root:
+            os.makedirs(path, exist_ok=True)
+    os.makedirs(root, exist_ok=True)
+    return paths
+
+
+def _run_dir(run_id: str) -> str:
+    layout = _ensure_control_plane_layout()
+    path = os.path.join(layout["runs"], _safe_run_id(run_id))
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _append_jsonl(path: str, payload: dict) -> None:
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 def _safe_run_id(run_id: str) -> str:
@@ -103,6 +139,11 @@ async def list_tools() -> list[types.Tool]:
                         "description": "Intent Contract 구조체",
                         "default": {},
                     },
+                    "harness_metadata": {
+                        "type": "object",
+                        "description": "선택된 lead/planner/worker 및 capability metadata",
+                        "default": {},
+                    },
                     "aux_metrics": {
                         "type": "object",
                         "description": "benchmark MCP가 반환한 보조 메트릭",
@@ -152,6 +193,10 @@ async def list_tools() -> list[types.Tool]:
                         "type": "object",
                         "default": {},
                     },
+                    "harness_metadata": {
+                        "type": "object",
+                        "default": {},
+                    },
                     "aux_metrics": {
                         "type": "object",
                         "default": {},
@@ -194,6 +239,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         git_diff = arguments.get("git_diff", "")
         proposals = arguments.get("proposals", "")
         intent_contract = arguments.get("intent_contract", {})
+        harness_metadata = arguments.get("harness_metadata", {})
         aux_metrics = arguments.get("aux_metrics", {})
 
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -233,6 +279,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         if proposals:
             content += f"### Proposals\n{proposals}\n\n"
 
+        content += _format_json_block("Harness Metadata", harness_metadata)
         content += _format_json_block("Benchmark Aux Metrics", aux_metrics)
 
         if git_diff:
@@ -240,6 +287,55 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
         with open(filepath, "a", encoding="utf-8") as handle:
             handle.write(content)
+
+        run_dir = _run_dir(run_id)
+        intent_path = os.path.join(run_dir, "intent.json")
+        if intent_contract and not os.path.exists(intent_path):
+            with open(intent_path, "w", encoding="utf-8") as handle:
+                json.dump(intent_contract, handle, indent=2, ensure_ascii=False)
+
+        telemetry_event = {
+            "timestamp": now,
+            "run_id": run_id,
+            "project_name": project_name,
+            "iteration": iteration,
+            "decision": decision,
+            "metric_key": metric_key,
+            "metric_value": metric_value,
+            "baseline_value": baseline_value,
+            "improvement_percent": improvement_percent,
+            "start_commit": start_commit,
+            "candidate_commit": candidate_commit,
+            "benchmark_command": benchmark_command,
+            "working_directory": working_directory,
+            "failure_reason": failure_reason,
+            "harness_metadata": harness_metadata,
+            "aux_metrics": aux_metrics,
+        }
+        _append_jsonl(os.path.join(run_dir, "telemetry.jsonl"), telemetry_event)
+
+        if decision in {"failure", "revert"} and failure_reason:
+            layout = _ensure_control_plane_layout()
+            failure_path = os.path.join(
+                layout["failures_open"],
+                f"{_safe_run_id(run_id)}-iter-{iteration}.json",
+            )
+            failure_payload = {
+                "component": harness_metadata.get("objective_component", "unspecified"),
+                "failure_type": failure_reason,
+                "reproduction": benchmark_command,
+                "expected": f"Metric improves by at least {improvement_percent} or threshold requirement",
+                "observed": {
+                    "decision": decision,
+                    "metric_key": metric_key,
+                    "metric_value": metric_value,
+                    "baseline_value": baseline_value,
+                },
+                "candidate_fix_area": proposals or summary,
+                "source_run_id": run_id,
+            }
+            with open(failure_path, "w", encoding="utf-8") as handle:
+                json.dump(failure_payload, handle, indent=2, ensure_ascii=False)
 
         return [
             types.TextContent(
@@ -274,6 +370,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         working_directory = arguments["working_directory"]
         failure_reasons = arguments.get("failure_reasons", [])
         intent_contract = arguments.get("intent_contract", {})
+        harness_metadata = arguments.get("harness_metadata", {})
         aux_metrics = arguments.get("aux_metrics", {})
 
         lower_is_better = metric_key in ("build_time", "latency_ms", "bundle_size")
@@ -314,6 +411,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             content += "\n".join(f"- {reason}" for reason in failure_reasons)
             content += "\n\n"
 
+        content += _format_json_block("Harness Metadata", harness_metadata)
         content += _format_json_block("Aux Metrics", aux_metrics)
 
         if full_git_diff:
@@ -321,6 +419,27 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
         with open(filepath, "w", encoding="utf-8") as handle:
             handle.write(content)
+
+        run_dir = _run_dir(run_id)
+        summary_payload = {
+            "run_id": run_id,
+            "project_name": project_name,
+            "total_iterations": total_iterations,
+            "metric_key": metric_key,
+            "initial_metric": initial_metric,
+            "final_metric": final_metric,
+            "improvements_kept": improvements_kept,
+            "summary": summary,
+            "failure_reasons": failure_reasons,
+            "harness_metadata": harness_metadata,
+            "intent_contract": intent_contract,
+            "aux_metrics": aux_metrics,
+            "start_commit": start_commit,
+            "final_commit": final_commit,
+            "run_branch": run_branch,
+        }
+        with open(os.path.join(run_dir, "summary.json"), "w", encoding="utf-8") as handle:
+            json.dump(summary_payload, handle, indent=2, ensure_ascii=False)
 
         return [
             types.TextContent(

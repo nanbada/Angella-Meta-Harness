@@ -1,8 +1,8 @@
 # Angella
 
-MacBook Pro M3 36GB에서 [Goose](https://github.com/block/goose)를 활용해 실행하는 로컬 self-optimize loop입니다.
+MacBook Pro M3 36GB에서 [Goose](https://github.com/block/goose)를 활용해 실행하는 adaptive hybrid harness입니다.
 
-공식 v1 경로는 `Goose + Ollama + generic benchmark MCP + logger MCP`입니다. 프로젝트별 benchmark MCP와 sub-recipe는 같은 계약을 만족하는 선택형 adapter로만 유지하며, 기본 실행 흐름은 [`recipes/autoresearch-loop.yaml`](recipes/autoresearch-loop.yaml) 하나로 고정합니다.
+Angella는 frontier lead/planner + local worker + control plane 구조를 사용합니다. 모델은 더 이상 고정값이 아니라 catalog/selector로 결정되며, 기본 실행 흐름은 [`recipes/autoresearch-loop.yaml`](recipes/autoresearch-loop.yaml) 하나로 고정합니다.
 
 ## 핵심 동작
 
@@ -15,7 +15,7 @@ Angella는 clean Git 저장소에서만 시작합니다.
 5. edit → benchmark → keep/revert를 반복합니다.
 6. 모든 iteration을 `run_id` 기준 로그와 final report로 남깁니다.
 
-핵심은 모델을 많이 붙이는 것이 아니라, 작은 가설과 객관적 메트릭, 안전한 revert, 투명한 run-scoped 로그를 유지하는 것입니다.
+핵심은 모델 이름 하나가 아니라, 의도 계약, selector 기반 모델 해상도, 객관적 메트릭, 안전한 revert, 그리고 run-scoped transparency입니다.
 
 ## 빠른 시작
 
@@ -49,10 +49,13 @@ bash setup.sh --yes
 - Stage 1: bootstrap
   - Goose CLI 확인 또는 Homebrew 설치
   - Ollama 확인 및 서버 시작 여부 점검
-  - `qwen2.5-coder:32b`, `gemma4:26b` 모델 확인
+  - harness catalog/profile resolution
+  - selected worker runtime 확인
   - reusable bootstrap Python env 준비
 - Stage 2: install
   - Goose config와 recipe/sub-recipe 렌더링
+  - custom provider/apfel template 렌더링
+  - control-plane 디렉토리 생성
   - Angella 로그 디렉토리 생성
   - follow-up 실행 정보 출력
 
@@ -85,9 +88,26 @@ wheelhouse를 미리 채우려면:
 bash scripts/build-wheelhouse.sh
 ```
 
-### 4. Gemini credential 확인
+Harness catalog를 보려면:
 
-Angella는 `GOOSE_LEAD_PROVIDER=google` 기본값을 사용합니다. `setup.sh`는 `GOOGLE_API_KEY`를 쓰거나 저장하지 않고 존재 여부만 안내합니다.
+```bash
+bash setup.sh --list-models
+bash setup.sh --list-harness-profiles
+```
+
+특정 조합을 강제하려면:
+
+```bash
+bash setup.sh --yes \
+  --harness-profile default \
+  --lead-model openai_gpt_5_2_pro \
+  --planner-model anthropic_claude_sonnet_4 \
+  --worker-model ollama_qwen25_coder_32b
+```
+
+### 4. Lead/Planner Credential 확인
+
+Angella는 lead/planner를 catalog/selector로 고릅니다. 기본 catalog에는 Google, Anthropic, OpenAI frontier 후보가 들어 있으며, `setup.sh`는 필요한 credential 존재 여부만 안내합니다.
 
 직접 설정하려면:
 
@@ -203,15 +223,23 @@ Angella/
 ├── setup.sh
 ├── .env.mlx.example
 ├── .goosehints
-├── .cache/                         # local bootstrap/cache only
+├── .cache/                         # local bootstrap/cache/control-plane only
 ├── config/
+│   ├── harness-models.yaml
+│   ├── harness-profiles.yaml
 │   ├── goose-config.yaml
-│   └── init-config.yaml
-│   └── Modelfile.qwen35-opus-v2.example
+│   ├── init-config.yaml
+│   ├── Modelfile.qwen35-opus-v2.example
+│   └── custom-providers/
 ├── docs/
+│   ├── hybrid-harness.md
 │   ├── setup-check-optimization-history.md
 │   └── setup-installer-architecture.md
+├── knowledge/
+│   ├── sops/
+│   └── skills/
 ├── scripts/
+│   ├── harness_catalog.py
 │   ├── build-wheelhouse.sh
 │   ├── setup-common.sh
 │   ├── setup-bootstrap.sh
@@ -219,6 +247,7 @@ Angella/
 │   └── test_setup_flows.sh
 ├── recipes/
 │   ├── autoresearch-loop.yaml
+│   ├── harness-self-optimize.yaml
 │   └── sub/
 │       ├── code-optimize.yaml
 │       └── evaluate-metric.yaml

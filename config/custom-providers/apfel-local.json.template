@@ -1,0 +1,14 @@
+{
+  "name": "angella_apfel_local",
+  "engine": "openai",
+  "display_name": "Angella apfel Local",
+  "description": "apfel low-latency local worker provider",
+  "api_key_env": "",
+  "base_url": "__ANGELLA_APFEL_BASE_URL__",
+  "models": [
+    {
+      "name": "__ANGELLA_APFEL_MODEL__",
+      "context_limit": 8192
+    }
+  ]
+}
