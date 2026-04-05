@@ -142,5 +142,8 @@ if [ "$BOOTSTRAP_ONLY" = false ] && [ "$LIST_MODELS" = false ] && [ "$LIST_HARNE
 fi
 
 if [ "$LIST_MODELS" = false ] && [ "$LIST_HARNESS_PROFILES" = false ]; then
+    if bootstrap_state_exists; then
+        load_bootstrap_state || true
+    fi
     print_summary
 fi

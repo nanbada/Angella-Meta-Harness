@@ -196,6 +196,9 @@ grep -q 'GOOSE_PLANNER_PROVIDER: "anthropic"' "$YES_HOME/.config/goose/config.ya
 grep -q 'GOOSE_PLANNER_MODEL: "claude-sonnet-4-20250514"' "$YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_PROVIDER: "ollama"' "$YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_MODEL: "gemma4:26b"' "$YES_HOME/.config/goose/config.yaml"
+grep -q 'lead: openai/gpt-5.2-pro' "$YES_OUT"
+grep -q 'planner: anthropic/claude-sonnet-4-20250514' "$YES_OUT"
+grep -q 'worker: ollama/gemma4:26b' "$YES_OUT"
 test -d "$ROOT_DIR/logs/Goose Logs"
 test -f "$ROOT_DIR/.cache/angella/control-plane/current-selection.json"
 
