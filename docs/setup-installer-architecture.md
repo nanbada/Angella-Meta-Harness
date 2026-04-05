@@ -109,8 +109,17 @@ Accepted-run finalization now does all of the following in one flow:
 - generate control-plane SOP/skill drafts from the accepted run summary
 - promote those drafts into tracked `knowledge/` files when the promotion rule is satisfied
 - merge into an existing tracked knowledge file by appending a run-scoped addendum instead of skipping immediately
+- dedupe repeated addendum content by fingerprint and repeated bullet lines
 - annotate `summary.json` with promotion/export/finalization metadata
 - prune stale draft and queue artifacts through the control-plane admin tool
+
+Read-only inspection is available through the control-plane admin tool and summarizes:
+
+- recent accepted runs
+- open failures
+- pending drafts
+- recent queue artifacts
+- retention policy
 
 When `dry_run=true`, draft generation, promotion, branch export, and queue writes are treated as no-op previews and must not mutate tracked files or control-plane draft state.
 

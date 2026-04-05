@@ -349,6 +349,14 @@ def main() -> int:
         assert not stale_prune_report.exists()
         assert retained_finalize.exists()
 
+        from meta_loop_ops import inspect_control_plane  # noqa: PLC0415
+
+        inspection = inspect_control_plane(run_limit=5, failure_limit=5, draft_limit=5, queue_limit=5)
+        assert inspection["recent_runs"]
+        assert inspection["open_failures"]
+        assert inspection["recent_queue"]
+        assert inspection["retention_policy_days"]["drafts"] == 14
+
     print("meta loop admin tests passed")
     return 0
 

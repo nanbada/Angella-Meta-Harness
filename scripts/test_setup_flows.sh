@@ -188,5 +188,6 @@ grep -q "Rendered recipe installed to" "$YES_OUT"
 
 python3 "$ROOT_DIR/scripts/test_control_plane_logging.py"
 python3 "$ROOT_DIR/scripts/test_meta_loop_admin.py"
+python3 "$ROOT_DIR/scripts/test_harness_self_optimize_adapter.py"
 
 echo "setup flow tests passed"

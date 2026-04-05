@@ -229,6 +229,7 @@ Accepted harness meta-loop run은 다음을 자동으로 수행할 수 있습니
 - 기존 tracked knowledge 파일이 있으면 run-scoped addendum merge
 - `codex/` 브랜치 push + draft PR 생성
 - stale draft / queue artifact 정리
+- inspection tool로 recent runs / failures / drafts / queue 상태 조회
 
 `dry_run=true` 경로는 preview 전용이며 draft 파일, queue entry, branch 상태를 실제로 바꾸지 않습니다.
 
@@ -239,6 +240,8 @@ Accepted export branch는 deterministic naming policy를 사용합니다.
 - 마지막에 stable hash suffix가 붙는다
 
 preview worker를 다시 도입할 때는 [`docs/preview-worker-reintroduction.md`](/Users/nanbada/projects/Angella/docs/preview-worker-reintroduction.md) 의 gating 전략을 따른다.
+
+promotion body 품질 기준은 [`docs/promotion-content-quality.md`](/Users/nanbada/projects/Angella/docs/promotion-content-quality.md) 에 정리한다.
 
 ## 프로젝트별 Adapter
 

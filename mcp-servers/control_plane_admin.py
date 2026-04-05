@@ -12,6 +12,7 @@ from meta_loop_ops import (
     export_meta_loop_change,
     finalize_accepted_meta_loop_run,
     generate_knowledge_drafts_from_run,
+    inspect_control_plane,
     prune_stale_control_plane_artifacts,
     promote_knowledge_drafts,
 )
@@ -100,6 +101,19 @@ async def list_tools() -> list[types.Tool]:
                 },
             },
         ),
+        types.Tool(
+            name="inspect_control_plane",
+            description="최근 runs, open failures, pending drafts, queue 상태를 요약합니다.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run_limit": {"type": "integer", "default": 5},
+                    "failure_limit": {"type": "integer", "default": 10},
+                    "draft_limit": {"type": "integer", "default": 10},
+                    "queue_limit": {"type": "integer", "default": 10}
+                },
+            },
+        ),
     ]
 
 
@@ -157,10 +171,20 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     if name == "prune_stale_control_plane_artifacts":
         return text_response(
             prune_stale_control_plane_artifacts(
-                max_age_days=arguments.get("max_age_days", 7),
+                max_age_days=arguments.get("max_age_days", 0),
                 include_drafts=arguments.get("include_drafts", True),
                 include_queue=arguments.get("include_queue", True),
                 dry_run=arguments.get("dry_run", False),
+            )
+        )
+
+    if name == "inspect_control_plane":
+        return text_response(
+            inspect_control_plane(
+                run_limit=arguments.get("run_limit", 5),
+                failure_limit=arguments.get("failure_limit", 10),
+                draft_limit=arguments.get("draft_limit", 10),
+                queue_limit=arguments.get("queue_limit", 10),
             )
         )
 

@@ -35,6 +35,13 @@ QUEUE_RETENTION_POLICY_DAYS = {
 }
 
 
+def queue_retention_policy_days() -> dict[str, Any]:
+    return {
+        "drafts": DEFAULT_DRAFT_RETENTION_DAYS,
+        "queue": dict(QUEUE_RETENTION_POLICY_DAYS),
+    }
+
+
 def _now_timestamp() -> str:
     return _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -288,6 +295,20 @@ def _log_final_report_path(run_id: str) -> Path:
     return DEFAULT_LOG_ROOT / f"{safe_run_id(run_id)}-FINAL.md"
 
 
+def _compact_text(value: str, limit: int = 240) -> str:
+    normalized = re.sub(r"\s+", " ", value.strip())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3].rstrip() + "..."
+
+
+def _bullet_block(items: list[str], empty_text: str = "_None_") -> str:
+    cleaned = [item for item in items if str(item).strip()]
+    if not cleaned:
+        return f"- {empty_text}"
+    return "\n".join(f"- {item}" for item in cleaned)
+
+
 def _build_sop_body(
     *,
     run_id: str,
@@ -296,21 +317,29 @@ def _build_sop_body(
     objective_component: str,
     failure_count: int,
 ) -> str:
-    metric_key = summary.get("metric_key", "")
-    summary_text = summary.get("summary", "")
+    metric_key = str(summary.get("metric_key", "")).strip()
+    summary_text = _compact_text(str(summary.get("summary", "")))
+    intent = summary.get("intent_contract", {}) if isinstance(summary.get("intent_contract", {}), dict) else {}
+    acceptance_checks = [str(item) for item in intent.get("binary_acceptance_checks", []) if str(item).strip()]
+    operator_constraints = [str(item) for item in intent.get("operator_constraints", []) if str(item).strip()]
     return (
         f"# Failure Pattern: {failure_type}\n\n"
         f"Generated from accepted run `{run_id}`.\n\n"
-        "## Context\n\n"
+        "## Trigger\n\n"
         f"- objective component: `{objective_component or 'unspecified'}`\n"
         f"- recurring failure type: `{failure_type}`\n"
         f"- observed failure count: `{failure_count}`\n"
         f"- metric key: `{metric_key}`\n\n"
-        "## Reusable pattern\n\n"
-        f"{summary_text or 'Review the accepted change and benchmark evidence for reusable repair steps.'}\n\n"
-        "## Promotion notes\n\n"
-        "- Review the linked failure artifacts before broad reuse.\n"
-        "- Update this SOP if a later accepted run tightens the fix boundaries.\n"
+        "## Symptoms\n\n"
+        f"- accepted evidence summary: {summary_text or 'Review the accepted change and benchmark evidence for reusable repair steps.'}\n\n"
+        "## Response Pattern\n\n"
+        "- check the accepted run summary, telemetry, and failure artifact together before editing\n"
+        "- keep the fix scoped to the component and acceptance boundary that repeated\n"
+        "- prefer deterministic config or workflow hardening over ad hoc operator steps\n\n"
+        "## Validation Checks\n\n"
+        f"{_bullet_block(acceptance_checks, empty_text='Re-run the benchmark path that originally failed.')}\n\n"
+        "## Reuse Boundary\n\n"
+        f"{_bullet_block(operator_constraints, empty_text='Escalate if the next occurrence needs a broader architectural change.')}\n"
     )
 
 
@@ -326,22 +355,28 @@ def _build_skill_body(
     worker_meta = resolved_models.get("worker", {}) if isinstance(resolved_models, dict) else {}
     provider = worker_meta.get("provider", "")
     model = worker_meta.get("model", "")
-    summary_text = summary.get("summary", "")
+    summary_text = _compact_text(str(summary.get("summary", "")))
+    intent = summary.get("intent_contract", {}) if isinstance(summary.get("intent_contract", {}), dict) else {}
+    non_goals = [str(item) for item in intent.get("non_goals", []) if str(item).strip()]
+    acceptance_checks = [str(item) for item in intent.get("binary_acceptance_checks", []) if str(item).strip()]
     return (
         f"# Worker Pattern: {worker_model_id}\n\n"
         f"Generated from accepted run `{run_id}`.\n\n"
-        "## Recommended when\n\n"
+        "## Use When\n\n"
         f"- objective component is `{objective_component or 'unspecified'}`\n"
         f"- worker id is `{worker_model_id}`\n"
         f"- accepted run evidence count is `{accepted_run_count}`\n\n"
         "## Resolved model\n\n"
         f"- provider: `{provider or 'unknown'}`\n"
         f"- model: `{model or 'unknown'}`\n\n"
-        "## Reusable pattern\n\n"
-        f"{summary_text or 'Review the accepted run to capture worker-specific execution guidance.'}\n\n"
-        "## Promotion notes\n\n"
-        "- Prefer promotion only when the accepted fix repeats across runs or the operator confirms reuse.\n"
-        "- Keep the skill scoped to the worker-specific behavior that actually repeated.\n"
+        "## Execution Pattern\n\n"
+        f"- accepted evidence summary: {summary_text or 'Review the accepted run to capture worker-specific execution guidance.'}\n"
+        "- keep prompts and eval scope tight around the repeated harness operation\n"
+        "- prefer deterministic benchmark and finalize paths over exploratory branching\n\n"
+        "## Avoid When\n\n"
+        f"{_bullet_block(non_goals, empty_text='Avoid using this skill as a blanket default outside the repeated objective component.')}\n\n"
+        "## Validation\n\n"
+        f"{_bullet_block(acceptance_checks, empty_text='Re-run the worker-specific benchmark and finalize checks.')}\n"
     )
 
 
@@ -763,6 +798,92 @@ def _annotate_run_summary_with_finalize(
             log_path.write_text(log_content, encoding="utf-8")
 
     return summary_payload
+
+
+def inspect_control_plane(
+    *,
+    run_limit: int = 5,
+    failure_limit: int = 10,
+    draft_limit: int = 10,
+    queue_limit: int = 10,
+) -> dict[str, Any]:
+    layout = ensure_control_plane_layout()
+    runs_root = Path(layout["runs"])
+    open_failures_root = Path(layout["failures_open"])
+    queue_root = Path(layout["meta_loop"])
+
+    recent_runs = []
+    run_summaries = sorted(runs_root.glob("*/summary.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    for path in run_summaries[:run_limit]:
+        try:
+            payload = _json_load(path)
+        except Exception:
+            continue
+        recent_runs.append(
+            {
+                "run_id": payload.get("run_id", path.parent.name),
+                "summary_path": str(path),
+                "metric_key": payload.get("metric_key", ""),
+                "improvements_kept": payload.get("improvements_kept", 0),
+                "run_branch": payload.get("run_branch", ""),
+                "export_branch": payload.get("export", {}).get("branch_name", ""),
+                "pr_url": payload.get("export", {}).get("pr_url", ""),
+            }
+        )
+
+    open_failures = []
+    for path in sorted(open_failures_root.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[:failure_limit]:
+        try:
+            payload = _json_load(path)
+        except Exception:
+            continue
+        open_failures.append(
+            {
+                "path": str(path),
+                "failure_type": payload.get("failure_type", ""),
+                "component": payload.get("component", ""),
+                "source_run_id": payload.get("source_run_id", ""),
+            }
+        )
+
+    pending_drafts = []
+    for kind in ("sop", "skill"):
+        for path in sorted(_knowledge_dir(kind).glob("*.md.meta.json"), key=lambda item: item.stat().st_mtime, reverse=True):
+            payload = _json_load(path)
+            if payload.get("status") == "promoted":
+                continue
+            pending_drafts.append(
+                {
+                    "draft_id": payload.get("draft_id", path.stem),
+                    "draft_kind": payload.get("draft_kind", kind),
+                    "source_run_id": payload.get("source_run_id", ""),
+                    "metadata_path": str(path),
+                }
+            )
+    pending_drafts = pending_drafts[:draft_limit]
+
+    recent_queue = []
+    for path in sorted(queue_root.glob("*"), key=lambda item: item.stat().st_mtime, reverse=True)[:queue_limit]:
+        if not path.is_file():
+            continue
+        recent_queue.append(
+            {
+                "path": str(path),
+                "kind": _queue_artifact_kind(path),
+            }
+        )
+
+    current_selection_path = Path(layout["root"]) / "current-selection.json"
+    current_selection = _json_load(current_selection_path) if current_selection_path.exists() else {}
+
+    return {
+        "recent_runs": recent_runs,
+        "open_failures": open_failures,
+        "pending_drafts": pending_drafts,
+        "recent_queue": recent_queue,
+        "retention_policy_days": queue_retention_policy_days(),
+        "current_selection": current_selection,
+    }
 
 
 def prune_stale_control_plane_artifacts(
