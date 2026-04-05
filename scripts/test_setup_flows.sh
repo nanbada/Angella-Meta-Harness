@@ -20,6 +20,11 @@ cat >"$FAKE_BIN/goose" <<'EOF'
 exit 0
 EOF
 
+cat >"$FAKE_BIN/uv" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+
 cat >"$FAKE_BIN/ollama" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -74,11 +79,13 @@ fi
 exec "\$REAL_PYTHON" "\$@"
 EOF
 
-chmod +x "$FAKE_BIN/brew" "$FAKE_BIN/goose" "$FAKE_BIN/ollama" "$FAKE_BIN/curl" "$FAKE_BIN/python3"
+chmod +x "$FAKE_BIN/brew" "$FAKE_BIN/goose" "$FAKE_BIN/ollama" "$FAKE_BIN/curl" "$FAKE_BIN/python3" "$FAKE_BIN/uv"
 
 CHECK_HOME="$TMP_ROOT/home-check"
 YES_HOME="$TMP_ROOT/home-yes"
-mkdir -p "$CHECK_HOME" "$YES_HOME"
+BOOTSTRAP_HOME="$TMP_ROOT/home-bootstrap"
+INSTALL_HOME="$TMP_ROOT/home-install"
+mkdir -p "$CHECK_HOME" "$YES_HOME" "$BOOTSTRAP_HOME" "$INSTALL_HOME"
 
 export PATH="$FAKE_BIN:$PATH"
 
@@ -93,6 +100,30 @@ CHECK_ERR="$TMP_ROOT/check.err"
 grep -q "Template rendering checks passed" "$CHECK_OUT"
 grep -q "Model 'qwen2.5-coder:32b' already pulled" "$CHECK_OUT"
 grep -q "Model 'gemma4:26b' already pulled" "$CHECK_OUT"
+
+BOOTSTRAP_OUT="$TMP_ROOT/bootstrap.out"
+BOOTSTRAP_ERR="$TMP_ROOT/bootstrap.err"
+
+(
+  cd "$ROOT_DIR"
+  HOME="$BOOTSTRAP_HOME" bash setup.sh --bootstrap-only >"$BOOTSTRAP_OUT" 2>"$BOOTSTRAP_ERR"
+)
+
+test -f "$ROOT_DIR/.cache/angella/bootstrap.env"
+test -f "$ROOT_DIR/.cache/angella/bootstrap-venv/bin/python"
+grep -q "Bootstrap Complete" "$BOOTSTRAP_OUT"
+
+INSTALL_OUT="$TMP_ROOT/install.out"
+INSTALL_ERR="$TMP_ROOT/install.err"
+
+(
+  cd "$ROOT_DIR"
+  HOME="$INSTALL_HOME" bash setup.sh --install-only >"$INSTALL_OUT" 2>"$INSTALL_ERR"
+)
+
+test -f "$INSTALL_HOME/.config/goose/config.yaml"
+test -f "$INSTALL_HOME/.config/goose/recipes/autoresearch-loop.yaml"
+grep -q "Setup Complete" "$INSTALL_OUT"
 
 YES_OUT="$TMP_ROOT/yes.out"
 YES_ERR="$TMP_ROOT/yes.err"

@@ -46,13 +46,15 @@ bash setup.sh --yes
 
 `setup.sh`는 다음을 수행합니다.
 
-- Goose CLI 확인 또는 Homebrew 설치
-- Ollama 확인 및 서버 시작 여부 점검
-- `qwen2.5-coder:32b`, `gemma4:26b` 모델 확인
-- MCP 서버용 Python interpreter 및 pip 확인
-- Python 의존성 설치
-- Goose config와 recipe/sub-recipe 렌더링
-- Angella 로그 디렉토리 생성
+- Stage 1: bootstrap
+  - Goose CLI 확인 또는 Homebrew 설치
+  - Ollama 확인 및 서버 시작 여부 점검
+  - `qwen2.5-coder:32b`, `gemma4:26b` 모델 확인
+  - reusable bootstrap Python env 준비
+- Stage 2: install
+  - Goose config와 recipe/sub-recipe 렌더링
+  - Angella 로그 디렉토리 생성
+  - follow-up 실행 정보 출력
 
 ### 3. 환경 변수 적용
 
@@ -62,6 +64,26 @@ source .env.mlx
 ```
 
 `.env.mlx.example`는 커밋되는 예시 파일이고, 실제 로컬 환경 파일은 `.env.mlx`로 두고 git에는 올리지 않습니다. 이 파일은 `ANGELLA_ROOT`와 `OBSIDIAN_VAULT_PATH`를 결정적으로 설정합니다. 별도 override가 없으면 로그는 Angella 설치 경로 하위 `logs/`에 저장됩니다.
+
+Repo-local cache paths:
+
+- bootstrap env: `.cache/angella/bootstrap-venv`
+- uv cache: `.cache/angella/uv`
+- pip cache: `.cache/angella/pip`
+- optional wheelhouse: `vendor/wheels`
+
+선택적으로 stage를 분리해서 실행할 수도 있습니다.
+
+```bash
+bash setup.sh --bootstrap-only
+bash setup.sh --install-only
+```
+
+wheelhouse를 미리 채우려면:
+
+```bash
+bash scripts/build-wheelhouse.sh
+```
 
 ### 4. Gemini credential 확인
 
@@ -181,9 +203,20 @@ Angella/
 ├── setup.sh
 ├── .env.mlx.example
 ├── .goosehints
+├── .cache/                         # local bootstrap/cache only
 ├── config/
 │   ├── goose-config.yaml
 │   └── init-config.yaml
+│   └── Modelfile.qwen35-opus-v2.example
+├── docs/
+│   ├── setup-check-optimization-history.md
+│   └── setup-installer-architecture.md
+├── scripts/
+│   ├── build-wheelhouse.sh
+│   ├── setup-common.sh
+│   ├── setup-bootstrap.sh
+│   ├── setup-install.sh
+│   └── test_setup_flows.sh
 ├── recipes/
 │   ├── autoresearch-loop.yaml
 │   └── sub/
@@ -197,5 +230,7 @@ Angella/
 │   ├── metric_benchmark_swift.py
 │   ├── obsidian_auto_log.py
 │   └── requirements.txt
+├── .github/workflows/
+│   └── repo-checks.yml
 └── logs/
 ```
