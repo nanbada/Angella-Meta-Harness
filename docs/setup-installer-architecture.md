@@ -34,6 +34,7 @@ Handled by [`scripts/setup-install.sh`](/Users/nanbada/projects/Angella/scripts/
 Responsibilities:
 - load `.env.mlx` or `.env.mlx.example`
 - render config and recipe templates
+- render both `autoresearch-loop` and `harness-self-optimize` recipes into Goose
 - render custom provider templates when needed
 - install rendered Goose config/recipes into `$HOME/.config/goose`
 - create the control-plane layout under `.cache/angella/control-plane`
@@ -110,6 +111,8 @@ Accepted-run finalization now does all of the following in one flow:
 - merge into an existing tracked knowledge file by appending a run-scoped addendum instead of skipping immediately
 - annotate `summary.json` with promotion/export/finalization metadata
 - prune stale draft and queue artifacts through the control-plane admin tool
+
+When `dry_run=true`, draft generation, promotion, branch export, and queue writes are treated as no-op previews and must not mutate tracked files or control-plane draft state.
 
 ## Wheelhouse strategy
 

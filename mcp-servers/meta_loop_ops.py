@@ -239,11 +239,13 @@ def _write_draft(
     slug: str,
     body: str,
     metadata: dict[str, Any],
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     markdown_path, metadata_path = _draft_paths(kind, slug)
-    markdown_path.parent.mkdir(parents=True, exist_ok=True)
-    markdown_path.write_text(body, encoding="utf-8")
-    _json_dump(metadata_path, metadata)
+    if not dry_run:
+        markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        markdown_path.write_text(body, encoding="utf-8")
+        _json_dump(metadata_path, metadata)
     return {
         "draft_path": str(markdown_path),
         "metadata_path": str(metadata_path),
@@ -258,6 +260,7 @@ def generate_knowledge_drafts_from_run(
     *,
     objective_component: str = "",
     operator_confirmed: bool = False,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     summary = load_run_summary(run_id)
     if not _is_accepted_summary(summary):
@@ -308,7 +311,15 @@ def generate_knowledge_drafts_from_run(
                 ]
             },
         }
-        created_drafts.append(_write_draft(kind="sop", slug=slug, body=body, metadata=metadata))
+        created_drafts.append(
+            _write_draft(
+                kind="sop",
+                slug=slug,
+                body=body,
+                metadata=metadata,
+                dry_run=dry_run,
+            )
+        )
 
     worker_model_id = _selected_worker_id(summary)
     if worker_model_id:
@@ -344,10 +355,19 @@ def generate_knowledge_drafts_from_run(
                 ]
             },
         }
-        created_drafts.append(_write_draft(kind="skill", slug=slug, body=body, metadata=metadata))
+        created_drafts.append(
+            _write_draft(
+                kind="skill",
+                slug=slug,
+                body=body,
+                metadata=metadata,
+                dry_run=dry_run,
+            )
+        )
 
     return {
         "run_id": run_id,
+        "dry_run": dry_run,
         "drafts_created": created_drafts,
     }
 
@@ -723,8 +743,10 @@ def export_meta_loop_change(
     pr_title = pr_title or f"meta-loop: {objective} accepted change ({run_id})"
 
     _run_cmd(["git", "rev-parse", "--is-inside-work-tree"], cwd=repo)
+    source_head = _run_cmd(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
     current_branch = _run_cmd(["git", "branch", "--show-current"], cwd=repo).stdout.strip()
     dirty = bool(_run_cmd(["git", "status", "--porcelain"], cwd=repo).stdout.strip())
+    branch_preexisting = _local_branch_exists(repo, sanitized_branch)
 
     if current_branch == base_branch and not dirty:
         raise RuntimeError(
@@ -732,18 +754,16 @@ def export_meta_loop_change(
         )
 
     if current_branch != sanitized_branch:
-        if _local_branch_exists(repo, sanitized_branch):
-            _run_cmd(["git", "switch", sanitized_branch], cwd=repo)
-        else:
-            _run_cmd(["git", "switch", "-c", sanitized_branch], cwd=repo)
+        if not dry_run:
+            _run_cmd(["git", "switch", "-C", sanitized_branch, source_head], cwd=repo)
 
-    if dirty:
+    if dirty and not dry_run:
         _run_cmd(["git", "add", "-A"], cwd=repo)
         staged_result = _run_cmd(["git", "diff", "--cached", "--quiet"], cwd=repo, check=False)
-        if staged_result.returncode != 0 and not dry_run:
+        if staged_result.returncode != 0:
             _run_cmd(["git", "commit", "-m", commit_message], cwd=repo)
 
-    head_commit = _run_cmd(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
+    head_commit = _run_cmd(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip() if not dry_run else source_head
     _run_cmd(["git", "remote", "get-url", "origin"], cwd=repo)
 
     queue_root = Path(ensure_control_plane_layout()["meta_loop"])
@@ -762,7 +782,10 @@ def export_meta_loop_change(
 
     pr_url = "dry-run"
     if not dry_run:
-        _run_cmd(["git", "push", "-u", "origin", sanitized_branch], cwd=repo)
+        push_args = ["git", "push", "-u", "origin", sanitized_branch]
+        if branch_preexisting:
+            push_args.insert(2, "--force-with-lease")
+        _run_cmd(push_args, cwd=repo)
         pr_result = _run_cmd(
             [
                 "gh",
@@ -840,6 +863,7 @@ def finalize_accepted_meta_loop_run(
         run_id,
         objective_component=objective_component,
         operator_confirmed=operator_confirmed,
+        dry_run=dry_run,
     )
     promotion_result = promote_knowledge_drafts(
         run_id=run_id,

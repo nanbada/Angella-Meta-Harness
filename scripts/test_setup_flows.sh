@@ -164,8 +164,10 @@ YES_ERR="$TMP_ROOT/yes.err"
 
 test -f "$YES_HOME/.config/goose/config.yaml"
 test -f "$YES_HOME/.config/goose/recipes/autoresearch-loop.yaml"
+test -f "$YES_HOME/.config/goose/recipes/harness-self-optimize.yaml"
 test -f "$YES_HOME/.config/goose/recipes/sub/code-optimize.yaml"
 test -f "$YES_HOME/.config/goose/recipes/sub/evaluate-metric.yaml"
+grep -q 'command: "harness-self-optimize"' "$YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_LEAD_PROVIDER: "openai"' "$YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_LEAD_MODEL: "gpt-5.2-pro"' "$YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_PLANNER_PROVIDER: "anthropic"' "$YES_HOME/.config/goose/config.yaml"
@@ -176,9 +178,9 @@ test -d "$ROOT_DIR/logs/Goose Logs"
 test -f "$ROOT_DIR/.cache/angella/control-plane/current-selection.json"
 
 if command -v rg >/dev/null 2>&1; then
-  ! rg -q '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__' "$YES_HOME/.config/goose"
+  ! rg -q '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__|__RENDERED_HARNESS_SELF_OPTIMIZE_PATH__' "$YES_HOME/.config/goose"
 else
-  ! grep -REq '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__' "$YES_HOME/.config/goose"
+  ! grep -REq '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__|__RENDERED_HARNESS_SELF_OPTIMIZE_PATH__' "$YES_HOME/.config/goose"
 fi
 
 grep -q "Goose config installed to" "$YES_OUT"

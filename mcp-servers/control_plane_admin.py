@@ -32,6 +32,7 @@ async def list_tools() -> list[types.Tool]:
                     "run_id": {"type": "string"},
                     "objective_component": {"type": "string", "default": ""},
                     "operator_confirmed": {"type": "boolean", "default": False},
+                    "dry_run": {"type": "boolean", "default": False},
                 },
                 "required": ["run_id"],
             },
@@ -110,6 +111,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 arguments["run_id"],
                 objective_component=arguments.get("objective_component", ""),
                 operator_confirmed=arguments.get("operator_confirmed", False),
+                dry_run=arguments.get("dry_run", False),
             )
         )
 

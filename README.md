@@ -123,6 +123,12 @@ goose configure
 goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s
 ```
 
+Harness self-optimize recipe도 설치 후 바로 사용할 수 있습니다.
+
+```bash
+goose run --recipe ~/.config/goose/recipes/harness-self-optimize.yaml -s
+```
+
 입력 파라미터:
 
 - `target_project_path`: 최적화할 프로젝트의 절대 경로
@@ -223,6 +229,8 @@ Accepted harness meta-loop run은 다음을 자동으로 수행할 수 있습니
 - 기존 tracked knowledge 파일이 있으면 run-scoped addendum merge
 - `codex/` 브랜치 push + draft PR 생성
 - stale draft / queue artifact 정리
+
+`dry_run=true` 경로는 preview 전용이며 draft 파일, queue entry, branch 상태를 실제로 바꾸지 않습니다.
 
 ## 프로젝트별 Adapter
 

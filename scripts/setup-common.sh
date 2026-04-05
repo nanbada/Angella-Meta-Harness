@@ -11,6 +11,7 @@ GOOSE_CONFIG_DIR="${HOME}/.config/goose"
 GOOSE_RECIPE_DIR="${GOOSE_CONFIG_DIR}/recipes"
 RENDERED_CONFIG_PATH="${GOOSE_CONFIG_DIR}/config.yaml"
 RENDERED_RECIPE_PATH="${GOOSE_RECIPE_DIR}/autoresearch-loop.yaml"
+RENDERED_HARNESS_SELF_OPTIMIZE_PATH="${GOOSE_RECIPE_DIR}/harness-self-optimize.yaml"
 RENDERED_SUB_RECIPE_DIR="${GOOSE_RECIPE_DIR}/sub"
 
 ANGELLA_CACHE_DIR="${ANGELLA_CACHE_DIR:-${SCRIPT_DIR}/.cache/angella}"
@@ -164,6 +165,7 @@ render_template() {
     local escaped_root
     local escaped_python
     local escaped_recipe_path
+    local escaped_harness_self_optimize_path
     local escaped_goose_provider
     local escaped_goose_model
     local escaped_goose_temperature
@@ -177,6 +179,7 @@ render_template() {
     escaped_root="$(escape_sed_replacement "$SCRIPT_DIR")"
     escaped_python="$(escape_sed_replacement "$PYTHON_CMD")"
     escaped_recipe_path="$(escape_sed_replacement "$RENDERED_RECIPE_PATH")"
+    escaped_harness_self_optimize_path="$(escape_sed_replacement "$RENDERED_HARNESS_SELF_OPTIMIZE_PATH")"
     escaped_goose_provider="$(escape_sed_replacement "${ANGELLA_WORKER_PROVIDER:-ollama}")"
     escaped_goose_model="$(escape_sed_replacement "${ANGELLA_WORKER_MODEL:-gemma4:26b}")"
     escaped_goose_temperature="$(escape_sed_replacement "${ANGELLA_WORKER_TEMPERATURE:-0.3}")"
@@ -192,6 +195,7 @@ render_template() {
         -e "s|__ANGELLA_ROOT__|$escaped_root|g" \
         -e "s|__PYTHON_CMD__|$escaped_python|g" \
         -e "s|__RENDERED_RECIPE_PATH__|$escaped_recipe_path|g" \
+        -e "s|__RENDERED_HARNESS_SELF_OPTIMIZE_PATH__|$escaped_harness_self_optimize_path|g" \
         -e "s|__GOOSE_PROVIDER__|$escaped_goose_provider|g" \
         -e "s|__GOOSE_MODEL__|$escaped_goose_model|g" \
         -e "s|__GOOSE_TEMPERATURE__|$escaped_goose_temperature|g" \
@@ -207,7 +211,7 @@ render_template() {
 verify_rendered_template() {
     local rendered_path=$1
 
-    if grep -Eq '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__' "$rendered_path"; then
+    if grep -Eq '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__|__RENDERED_HARNESS_SELF_OPTIMIZE_PATH__' "$rendered_path"; then
         fail "Unresolved template placeholder found in $rendered_path"
         return 1
     fi
@@ -630,11 +634,13 @@ render_all_templates() {
 
     verify_template_source_portable "$SCRIPT_DIR/config/goose-config.yaml"
     verify_template_source_portable "$SCRIPT_DIR/recipes/autoresearch-loop.yaml"
+    verify_template_source_portable "$SCRIPT_DIR/recipes/harness-self-optimize.yaml"
     verify_template_source_portable "$SCRIPT_DIR/recipes/sub/code-optimize.yaml"
     verify_template_source_portable "$SCRIPT_DIR/recipes/sub/evaluate-metric.yaml"
 
     render_and_verify "$SCRIPT_DIR/config/goose-config.yaml" "$config_target"
     render_and_verify "$SCRIPT_DIR/recipes/autoresearch-loop.yaml" "$recipe_target"
+    render_and_verify "$SCRIPT_DIR/recipes/harness-self-optimize.yaml" "$CHECK_RENDER_DIR/harness-self-optimize.yaml"
     render_and_verify "$SCRIPT_DIR/recipes/sub/code-optimize.yaml" "$sub_recipe_dir/code-optimize.yaml"
     render_and_verify "$SCRIPT_DIR/recipes/sub/evaluate-metric.yaml" "$sub_recipe_dir/evaluate-metric.yaml"
 }
@@ -652,6 +658,7 @@ check_templates_only() {
 install_templates() {
     info "Rendering Angella templates..."
     render_and_verify "$SCRIPT_DIR/recipes/autoresearch-loop.yaml" "$RENDERED_RECIPE_PATH"
+    render_and_verify "$SCRIPT_DIR/recipes/harness-self-optimize.yaml" "$RENDERED_HARNESS_SELF_OPTIMIZE_PATH"
     render_and_verify "$SCRIPT_DIR/recipes/sub/code-optimize.yaml" "$RENDERED_SUB_RECIPE_DIR/code-optimize.yaml"
     render_and_verify "$SCRIPT_DIR/recipes/sub/evaluate-metric.yaml" "$RENDERED_SUB_RECIPE_DIR/evaluate-metric.yaml"
 
@@ -669,6 +676,7 @@ install_templates() {
     fi
 
     ok "Rendered recipe installed to $RENDERED_RECIPE_PATH"
+    ok "Rendered recipe installed to $RENDERED_HARNESS_SELF_OPTIMIZE_PATH"
     ok "Rendered sub-recipes installed to $RENDERED_SUB_RECIPE_DIR"
 }
 

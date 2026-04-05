@@ -16,7 +16,12 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "mcp-servers"))
 
-from meta_loop_ops import finalize_accepted_meta_loop_run, prune_stale_control_plane_artifacts  # noqa: E402
+from meta_loop_ops import (
+    export_meta_loop_change,
+    finalize_accepted_meta_loop_run,
+    generate_knowledge_drafts_from_run,
+    prune_stale_control_plane_artifacts,
+)  # noqa: E402
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -156,7 +161,38 @@ def main() -> int:
             {"failure_type": "threshold_not_met"},
         )
 
+        dry_run_drafts = generate_knowledge_drafts_from_run(
+            run_id,
+            objective_component="setup-check",
+            dry_run=True,
+        )
+        assert dry_run_drafts["dry_run"] is True
+        for item in dry_run_drafts["drafts_created"]:
+            assert not Path(item["draft_path"]).exists()
+            assert not Path(item["metadata_path"]).exists()
+
+        queue_before = sorted(
+            path.name for path in (control_plane / "queue" / "meta-loop").glob("*")
+        )
         (repo / "harness-change.txt").write_text("accepted change\n", encoding="utf-8")
+        dry_run_finalize = finalize_accepted_meta_loop_run(
+            run_id,
+            objective_component="setup-check",
+            base_branch="main",
+            pr_summary="Dry run should not change git or control-plane state.",
+            operator_confirmed=False,
+            dry_run=True,
+            repo_root=repo,
+        )
+        assert dry_run_finalize["export"]["pr_url"] == "dry-run"
+        assert _run(["git", "branch", "--show-current"], cwd=repo, env=env) == "main"
+        assert not any((control_plane / "knowledge" / "sops").glob("failure-threshold-not-met.md.meta.json"))
+        assert not any((control_plane / "knowledge" / "skills").glob("worker-ollama-gemma4-26b.md.meta.json"))
+        queue_after = sorted(
+            path.name for path in (control_plane / "queue" / "meta-loop").glob("*")
+        )
+        assert queue_before == queue_after
+        assert "harness-change.txt" in _run(["git", "status", "--short"], cwd=repo, env=env)
 
         result = finalize_accepted_meta_loop_run(
             run_id,
@@ -195,6 +231,21 @@ def main() -> int:
             env=env,
         )
         assert current_branch in remote_head.splitlines()
+
+        _run(["git", "switch", "-c", "retry-source"], cwd=repo, env=env)
+        (repo / "retry-change.txt").write_text("retry export state\n", encoding="utf-8")
+        retry_export = export_meta_loop_change(
+            run_id,
+            objective_component="setup-check",
+            base_branch="main",
+            pr_summary="Retry export should follow current source head.",
+            repo_root=repo,
+        )
+        retry_branch = retry_export["branch_name"]
+        assert retry_branch == current_branch
+        assert _run(["git", "branch", "--show-current"], cwd=repo, env=env) == retry_branch
+        assert (repo / "retry-change.txt").is_file()
+        assert "retry-change.txt" in _run(["git", "show", "--stat", "--oneline", "HEAD"], cwd=repo, env=env)
 
         stale_metadata = control_plane / "knowledge" / "sops" / "stale-item.md.meta.json"
         stale_markdown = control_plane / "knowledge" / "sops" / "stale-item.md"
