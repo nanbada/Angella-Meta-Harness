@@ -193,14 +193,16 @@ render_and_verify() {
 
 install_python_requirements() {
     local requirements_file=$1
-    local required_packages=("mcp" "fastmcp")
+    local required_packages=("mcp")
     local spec_probe='import importlib.util, sys;'
     local package_name
+    local python_executable
+    local pip_install_args=(-m pip install --disable-pip-version-check -r "$requirements_file")
 
     if [ "$PYTHON_PIP_AVAILABLE" != true ] && ! "$PYTHON_CMD" -m pip --version >/dev/null 2>&1; then
         warn "pip is not available for $PYTHON_CMD. Install Python dependencies manually:"
         echo "  $PYTHON_CMD -m ensurepip --upgrade"
-        echo "  $PYTHON_CMD -m pip install mcp fastmcp"
+        echo "  $PYTHON_CMD -m pip install mcp"
         return 1
     fi
 
@@ -214,17 +216,26 @@ install_python_requirements() {
         return 0
     fi
 
-    if "$PYTHON_CMD" -m pip install -r "$requirements_file" --quiet 2>/dev/null; then
+    python_executable="$("$PYTHON_CMD" -c 'import sys; print(sys.executable)')"
+
+    if command -v uv >/dev/null 2>&1; then
+        if uv pip install --python "$python_executable" -r "$requirements_file" --quiet 2>/dev/null; then
+            return 0
+        fi
+        warn "uv pip install failed. Falling back to pip..."
+    fi
+
+    if "$PYTHON_CMD" "${pip_install_args[@]}" --quiet 2>/dev/null; then
         return 0
     fi
 
     warn "pip install failed. Trying with --user flag..."
-    if "$PYTHON_CMD" -m pip install -r "$requirements_file" --user --quiet 2>/dev/null; then
+    if "$PYTHON_CMD" "${pip_install_args[@]}" --user --quiet 2>/dev/null; then
         return 0
     fi
 
     warn "pip --user install failed. Trying with --break-system-packages..."
-    if "$PYTHON_CMD" -m pip install -r "$requirements_file" --user --break-system-packages --quiet 2>/dev/null; then
+    if "$PYTHON_CMD" "${pip_install_args[@]}" --user --break-system-packages --quiet 2>/dev/null; then
         return 0
     fi
 
