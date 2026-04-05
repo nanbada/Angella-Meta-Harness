@@ -96,26 +96,6 @@
       "flags": ["vision", "json_mode", "reasoning"]
     },
     {
-      "id": "ollama_qwen25_coder_32b",
-      "provider": "ollama",
-      "goose_provider": "ollama",
-      "model": "qwen2.5-coder:32b",
-      "display_name": "Ollama Qwen 2.5 Coder 32B",
-      "role_support": ["worker"],
-      "context_limit": 16384,
-      "temperature_default": 0.3,
-      "tool_use_score": 95,
-      "reasoning_score": 78,
-      "latency_score": 55,
-      "cost_score": 90,
-      "stability_score": 90,
-      "priority": 90,
-      "requires_env": [],
-      "availability_check": ["ollama_model:qwen2.5-coder:32b"],
-      "auto_pull_on_bootstrap": true,
-      "flags": ["mlx_local", "coding", "reasoning"]
-    },
-    {
       "id": "ollama_gemma4_26b",
       "provider": "ollama",
       "goose_provider": "ollama",
@@ -134,29 +114,6 @@
       "availability_check": ["ollama_model:gemma4:26b"],
       "auto_pull_on_bootstrap": true,
       "flags": ["mlx_local", "reasoning"]
-    },
-    {
-      "id": "ollama_qwen35_opus_v2_preview",
-      "provider": "ollama",
-      "goose_provider": "ollama",
-      "model": "qwen35-opus-v2:latest",
-      "display_name": "Ollama Qwen3.5 Opus V2 Preview",
-      "role_support": ["worker"],
-      "context_limit": 8192,
-      "temperature_default": 0.2,
-      "tool_use_score": 96,
-      "reasoning_score": 94,
-      "latency_score": 50,
-      "cost_score": 70,
-      "stability_score": 60,
-      "priority": 85,
-      "requires_env": [],
-      "availability_check": [
-        "env_flag:ANGELLA_ENABLE_NVFP4_PREVIEW=1",
-        "ollama_model:qwen35-opus-v2:latest"
-      ],
-      "auto_pull_on_bootstrap": false,
-      "flags": ["mlx_local", "preview", "reasoning", "coding"]
     },
     {
       "id": "apfel_foundationmodel",

@@ -8,7 +8,7 @@
 # ============================================================
 
 GOOSE_PROVIDER: ollama
-GOOSE_MODEL: qwen2.5-coder:32b
+GOOSE_MODEL: gemma4:26b
 
 # Lead/Worker Harness
 GOOSE_LEAD_PROVIDER: google

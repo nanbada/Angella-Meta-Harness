@@ -2,11 +2,11 @@
   "profiles": [
     {
       "id": "default",
-      "display_name": "Default Frontier + Local Coder",
+      "display_name": "Default Frontier + Local Gemma4",
       "default": true,
       "lead_selector": "best_reasoning_frontier",
       "planner_selector": "best_reasoning_frontier",
-      "worker_selector": "best_local_coder",
+      "worker_selector": "best_local_reasoning",
       "non_goals": [
         "Hard-code Gemini as permanent lead",
         "Use preview worker by default",
@@ -25,10 +25,10 @@
     },
     {
       "id": "frontier_low_cost",
-      "display_name": "Frontier Low Cost + Local Coder",
+      "display_name": "Frontier Low Cost + Local Gemma4",
       "lead_selector": "best_reasoning_frontier_low_cost",
       "planner_selector": "best_reasoning_frontier_low_cost",
-      "worker_selector": "best_local_coder",
+      "worker_selector": "best_local_reasoning",
       "non_goals": [
         "Use the most expensive frontier model when lower-cost frontier is sufficient"
       ],
@@ -85,11 +85,12 @@
     },
     {
       "id": "preview_nvfp4",
-      "display_name": "Frontier Lead + NVFP4 Preview Worker",
+      "display_name": "Frontier Lead + Preview Worker",
       "lead_selector": "best_reasoning_frontier",
       "planner_selector": "best_reasoning_frontier",
-      "worker_selector": "best_local_coder",
+      "worker_selector": "best_local_preview",
       "non_goals": [
+        "Assume a preview worker exists when the catalog has no preview entry",
         "Use preview worker on unsupported hosts"
       ],
       "mlx_policy": {

@@ -61,6 +61,16 @@ extensions:
     timeout: 300
     description: "run-scoped transparency 로그와 final report 저장"
 
+  control-plane-admin:
+    enabled: true
+    name: control-plane-admin
+    type: stdio
+    cmd: __PYTHON_CMD__
+    args:
+      - "__ANGELLA_ROOT__/mcp-servers/control_plane_admin.py"
+    timeout: 300
+    description: "knowledge draft promotion과 meta-loop codex branch/draft PR export 자동화"
+
 # --- Slash Commands (optional) ---
 slash_commands:
   - command: "autoresearch"

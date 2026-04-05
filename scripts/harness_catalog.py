@@ -67,7 +67,10 @@ def availability_for_model(model: dict, tags: dict) -> tuple[bool, list[str], bo
         if check.startswith("ollama_model:"):
             model_name = check.split(":", 1)[1]
             if not tags.get("models"):
-                reasons.append("ollama_unreachable")
+                if model.get("auto_pull_on_bootstrap", False):
+                    provisionable = True
+                else:
+                    reasons.append("ollama_unreachable")
             elif not model_present(tags, model_name):
                 if model.get("auto_pull_on_bootstrap", False):
                     provisionable = True
@@ -115,6 +118,13 @@ def selector_sort_key(selector: str, model: dict):
             model["stability_score"],
             model["priority"],
         )
+    if selector == "best_local_preview":
+        return (
+            model["reasoning_score"],
+            model["tool_use_score"],
+            model["stability_score"],
+            model["priority"],
+        )
     if selector == "best_local_reasoning":
         return (
             model["reasoning_score"],
@@ -133,6 +143,8 @@ def selector_sort_key(selector: str, model: dict):
 def selector_candidates(selector: str, models: list[dict], role: str) -> list[dict]:
     if selector.startswith("best_reasoning_frontier"):
         return [m for m in models if role in m["role_support"] and m["provider"] in {"google", "anthropic", "openai"}]
+    if selector == "best_local_preview":
+        return [m for m in models if role in m["role_support"] and "preview" in m.get("flags", [])]
     return [m for m in models if role in m["role_support"]]
 
 

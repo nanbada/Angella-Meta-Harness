@@ -102,7 +102,7 @@ bash setup.sh --yes \
   --harness-profile default \
   --lead-model openai_gpt_5_2_pro \
   --planner-model anthropic_claude_sonnet_4 \
-  --worker-model ollama_qwen25_coder_32b
+  --worker-model ollama_gemma4_26b
 ```
 
 ### 4. Lead/Planner Credential 확인
@@ -144,10 +144,14 @@ goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s \
 
 루프는 baseline 전에 아래 계약을 고정합니다.
 
+- `ideal_state_8_12_words`
+- `metric_key`
 - `intent_summary`
 - `metric_reason`
 - `non_goals`
 - `success_threshold`
+- `binary_acceptance_checks`
+- `operator_constraints`
 - `first_hypotheses`
 
 이 값은 baseline 로그와 final report에 모두 기록됩니다.
@@ -204,6 +208,22 @@ goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s \
 - `failure_reason`
 - Intent Contract
 
+Control-plane runtime state:
+
+- `.cache/angella/control-plane/runs/<run_id>/intent.json`
+- `.cache/angella/control-plane/runs/<run_id>/telemetry.jsonl`
+- `.cache/angella/control-plane/runs/<run_id>/summary.json`
+- `.cache/angella/control-plane/failures/open/*.json`
+- `.cache/angella/control-plane/queue/meta-loop/*.json`
+
+Accepted harness meta-loop run은 다음을 자동으로 수행할 수 있습니다.
+
+- SOP/skill draft 생성
+- promotion rule 충족 시 tracked `knowledge/` 로 승격
+- 기존 tracked knowledge 파일이 있으면 run-scoped addendum merge
+- `codex/` 브랜치 push + draft PR 생성
+- stale draft / queue artifact 정리
+
 ## 프로젝트별 Adapter
 
 기본 flow는 generic benchmark MCP를 사용합니다. 아래 adapter는 같은 출력 계약과 `run_benchmark`/`compare_metrics` 인터페이스를 제공하는 선택형 대체재입니다.
@@ -229,7 +249,6 @@ Angella/
 │   ├── harness-profiles.yaml
 │   ├── goose-config.yaml
 │   ├── init-config.yaml
-│   ├── Modelfile.qwen35-opus-v2.example
 │   └── custom-providers/
 ├── docs/
 │   ├── hybrid-harness.md

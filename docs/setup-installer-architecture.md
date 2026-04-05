@@ -87,6 +87,30 @@ The resolved selection is persisted into bootstrap state and mirrored into:
 - control-plane `current-selection.json`
 - future run telemetry
 
+## Control-plane artifacts
+
+Recipe/runtime logging now normalizes the control-plane payloads instead of writing ad hoc JSON blobs.
+
+- `runs/<run_id>/intent.json`
+  - always includes `ideal_state_8_12_words`, `metric_key`, `success_threshold`, `binary_acceptance_checks`, `non_goals`, `operator_constraints`
+  - records validation metadata for the 8-12 word ideal-state contract
+- `runs/<run_id>/telemetry.jsonl`
+  - appends structured loop iteration events with normalized intent and harness metadata
+- `runs/<run_id>/summary.json`
+  - records selected model ids, resolved provider/model names, env capability snapshot, benchmark history, failure causes, kept changes, and reverted changes
+- `failures/open/*.json`
+  - stores normalized failure artifacts with `component`, `failure_type`, `reproduction`, `expected`, `observed`, `candidate_fix_area`, and `source_run_id`
+- `queue/meta-loop/*.json`
+  - stores promotion reports, accepted-run finalize records, branch/export metadata, and PR bookkeeping
+
+Accepted-run finalization now does all of the following in one flow:
+
+- generate control-plane SOP/skill drafts from the accepted run summary
+- promote those drafts into tracked `knowledge/` files when the promotion rule is satisfied
+- merge into an existing tracked knowledge file by appending a run-scoped addendum instead of skipping immediately
+- annotate `summary.json` with promotion/export/finalization metadata
+- prune stale draft and queue artifacts through the control-plane admin tool
+
 ## Wheelhouse strategy
 
 An optional wheelhouse can be created with:
@@ -102,4 +126,4 @@ If `vendor/wheels` contains wheels, setup prefers them as an install source befo
 - explicit bootstrap environment versioning / invalidation metadata
 - relocating the bootstrap env outside the repo when desired
 - optional fully offline install mode using a complete wheelhouse
-- deeper control-plane integration with the meta-loop recipe and SOP promotion
+- richer merge/update strategy when a promoted draft targets an existing tracked knowledge file

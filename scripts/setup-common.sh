@@ -178,7 +178,7 @@ render_template() {
     escaped_python="$(escape_sed_replacement "$PYTHON_CMD")"
     escaped_recipe_path="$(escape_sed_replacement "$RENDERED_RECIPE_PATH")"
     escaped_goose_provider="$(escape_sed_replacement "${ANGELLA_WORKER_PROVIDER:-ollama}")"
-    escaped_goose_model="$(escape_sed_replacement "${ANGELLA_WORKER_MODEL:-qwen2.5-coder:32b}")"
+    escaped_goose_model="$(escape_sed_replacement "${ANGELLA_WORKER_MODEL:-gemma4:26b}")"
     escaped_goose_temperature="$(escape_sed_replacement "${ANGELLA_WORKER_TEMPERATURE:-0.3}")"
     escaped_goose_lead_provider="$(escape_sed_replacement "${ANGELLA_LEAD_PROVIDER:-google}")"
     escaped_goose_lead_model="$(escape_sed_replacement "${ANGELLA_LEAD_MODEL:-gemini-2.5-pro}")"
@@ -745,7 +745,7 @@ print_summary() {
     echo "     profile: ${ANGELLA_HARNESS_PROFILE_ID:-default}"
     echo "     lead: ${ANGELLA_LEAD_PROVIDER:-google}/${ANGELLA_LEAD_MODEL:-gemini-2.5-pro}"
     echo "     planner: ${ANGELLA_PLANNER_PROVIDER:-google}/${ANGELLA_PLANNER_MODEL:-gemini-2.5-pro}"
-    echo "     worker: ${ANGELLA_WORKER_PROVIDER:-ollama}/${ANGELLA_WORKER_MODEL:-qwen2.5-coder:32b}"
+    echo "     worker: ${ANGELLA_WORKER_PROVIDER:-ollama}/${ANGELLA_WORKER_MODEL:-gemma4:26b}"
     echo ""
 
     if [ "$BOOTSTRAP_ONLY" = true ]; then
