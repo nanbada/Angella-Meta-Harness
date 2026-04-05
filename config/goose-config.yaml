@@ -42,7 +42,7 @@ extensions:
     args:
       - "__ANGELLA_ROOT__/mcp-servers/metric_benchmark.py"
     timeout: 300
-    description: "범용 벤치마크 실행 + objective metric 추출 (MLX 최적화)"
+    description: "공통 benchmark payload + compare_metrics 제공"
 
   obsidian-auto-log:
     enabled: true
@@ -52,7 +52,7 @@ extensions:
     args:
       - "__ANGELLA_ROOT__/mcp-servers/obsidian_auto_log.py"
     timeout: 300
-    description: "Autoresearch loop 결과를 Obsidian/로컬에 자동 로그 저장"
+    description: "run-scoped transparency 로그와 final report 저장"
 
 # --- Slash Commands (optional) ---
 slash_commands:

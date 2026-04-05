@@ -1,50 +1,52 @@
 #!/usr/bin/env python3
-"""
-Next.js Metric Benchmark MCP Server
-====================================
-Next.js 프로젝트 빌드 시간 + 번들 사이즈 + route별 사이즈 측정.
-"""
+"""Next.js benchmark adapter with the shared benchmark schema."""
 
+import os
+import re
 import subprocess
 import time
-import re
-import json
-import os
 
+from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp import types
+
+from common import (
+    SUPPORTED_METRICS,
+    build_benchmark_payload,
+    compare_metrics_payload,
+    text_response,
+)
 
 server = Server("metric-benchmark-nextjs")
 
 
 def _parse_next_build(stdout: str, stderr: str) -> dict:
-    """Next.js 빌드 로그에서 메트릭 추출"""
     combined = stdout + stderr
     metrics = {
         "pages": [],
         "total_first_load_kb": 0.0,
         "largest_page_kb": 0.0,
+        "page_count": 0,
     }
 
-    # Route sizes: "○ /api/hello  2.3 kB"
     route_pattern = r"[○●λƒ]\s+(/\S+)\s+([0-9.]+)\s*(kB|KB|B|MB)"
     for match in re.finditer(route_pattern, combined):
         route, size, unit = match.groups()
         size_kb = float(size)
-        if unit in ("B",):
+        if unit == "B":
             size_kb /= 1024
-        elif unit in ("MB",):
+        elif unit == "MB":
             size_kb *= 1024
-        metrics["pages"].append({"route": route, "size_kb": round(size_kb, 2)})
-        if size_kb > metrics["largest_page_kb"]:
-            metrics["largest_page_kb"] = size_kb
 
-    # First Load JS shared: "First Load JS shared by all  87.3 kB"
+        size_kb = round(size_kb, 2)
+        metrics["pages"].append({"route": route, "size_kb": size_kb})
+        metrics["largest_page_kb"] = max(metrics["largest_page_kb"], size_kb)
+
     fl_match = re.search(r"First Load JS.*?([0-9.]+)\s*kB", combined)
     if fl_match:
         metrics["total_first_load_kb"] = float(fl_match.group(1))
 
+    metrics["page_count"] = len(metrics["pages"])
     return metrics
 
 
@@ -52,22 +54,52 @@ def _parse_next_build(stdout: str, stderr: str) -> dict:
 async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
-            name="benchmark_nextjs",
-            description="Next.js 프로젝트의 빌드 시간, 번들 사이즈, route별 사이즈를 측정합니다.",
+            name="run_benchmark",
+            description="Next.js 프로젝트를 측정하고 공통 benchmark payload를 반환합니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "project_path": {
-                        "type": "string",
-                        "description": "Next.js 프로젝트 루트 경로",
-                    },
-                    "build_command": {
+                    "command": {
                         "type": "string",
                         "description": "빌드 명령어",
                         "default": "npm run build",
                     },
+                    "metric_key": {
+                        "type": "string",
+                        "enum": ["build_time", "bundle_size"],
+                        "default": "build_time",
+                    },
+                    "working_directory": {
+                        "type": "string",
+                        "description": "Next.js 프로젝트 루트 경로",
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "description": "최대 실행 시간 (초)",
+                        "default": 300,
+                    },
                 },
-                "required": ["project_path"],
+                "required": ["working_directory"],
+            },
+        ),
+        types.Tool(
+            name="compare_metrics",
+            description="두 메트릭 값을 비교하여 개선 여부를 판정합니다.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "baseline": {"type": "number"},
+                    "current": {"type": "number"},
+                    "metric_key": {
+                        "type": "string",
+                        "enum": list(SUPPORTED_METRICS),
+                    },
+                    "threshold_percent": {
+                        "type": "number",
+                        "default": 1.0,
+                    },
+                },
+                "required": ["baseline", "current", "metric_key"],
             },
         ),
     ]
@@ -75,45 +107,132 @@ async def list_tools() -> list[types.Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    if name == "benchmark_nextjs":
-        project_path = os.path.expanduser(arguments["project_path"])
-        build_cmd = arguments.get("build_command", "npm run build")
+    if name in {"run_benchmark", "benchmark_nextjs"}:
+        if name == "benchmark_nextjs":
+            project_path = os.path.expanduser(arguments["project_path"])
+            command = arguments.get("build_command", "npm run build")
+            metric_key = arguments.get("metric_key", "build_time")
+            timeout = int(arguments.get("timeout_seconds", 300))
+        else:
+            project_path = os.path.expanduser(arguments["working_directory"])
+            command = arguments.get("command", "npm run build")
+            metric_key = arguments.get("metric_key", "build_time")
+            timeout = int(arguments.get("timeout_seconds", 300))
+
+        if metric_key not in {"build_time", "bundle_size"}:
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=0.0,
+                    exit_code=2,
+                    aux_metrics={"failure_reason": "unsupported_metric_for_nextjs"},
+                )
+            )
+
+        if not os.path.isdir(project_path):
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=0.0,
+                    exit_code=2,
+                    aux_metrics={
+                        "failure_reason": "working_directory_not_found",
+                        "working_directory": project_path,
+                    },
+                )
+            )
 
         try:
             start = time.time()
             result = subprocess.run(
-                build_cmd,
+                command,
                 shell=True,
                 capture_output=True,
                 text=True,
                 cwd=project_path,
-                timeout=300,
+                timeout=timeout,
                 env={**os.environ},
             )
-            build_time = round(time.time() - start, 3)
+            duration = time.time() - start
 
             next_metrics = _parse_next_build(result.stdout, result.stderr)
+            metric_value = duration if metric_key == "build_time" else next_metrics["total_first_load_kb"]
+            metric_found = metric_key == "build_time" or next_metrics["total_first_load_kb"] > 0
+            success = result.returncode == 0 and metric_found
 
-            output = {
-                "metric_key": "build_time",
-                "metric_value": build_time,
-                "build_time_seconds": build_time,
-                "total_first_load_kb": next_metrics["total_first_load_kb"],
-                "largest_page_kb": next_metrics["largest_page_kb"],
-                "page_count": len(next_metrics["pages"]),
-                "pages": next_metrics["pages"][:10],  # Top 10
-                "success": result.returncode == 0,
-                "log": result.stdout[-1000:],
-            }
+            failure_reason = ""
+            if result.returncode != 0:
+                failure_reason = "command_failed"
+            elif not metric_found:
+                failure_reason = "metric_parse_failed"
 
-            return [types.TextContent(type="text", text=json.dumps(output, indent=2, ensure_ascii=False))]
-
+            return text_response(
+                build_benchmark_payload(
+                    success=success,
+                    metric_key=metric_key,
+                    metric_value=metric_value,
+                    duration_seconds=duration,
+                    exit_code=result.returncode,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    aux_metrics={
+                        "command": command,
+                        "working_directory": project_path,
+                        "page_count": next_metrics["page_count"],
+                        "pages": next_metrics["pages"][:10],
+                        "largest_page_kb": next_metrics["largest_page_kb"],
+                        "total_first_load_kb": next_metrics["total_first_load_kb"],
+                        "failure_reason": failure_reason,
+                    },
+                )
+            )
         except subprocess.TimeoutExpired:
-            return [types.TextContent(type="text", text=json.dumps({"error": "Build timeout (300s)", "success": False}))]
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=float(timeout),
+                    exit_code=124,
+                    aux_metrics={
+                        "failure_reason": "timeout",
+                        "command": command,
+                        "working_directory": project_path,
+                    },
+                )
+            )
         except Exception as e:
-            return [types.TextContent(type="text", text=json.dumps({"error": str(e), "success": False}))]
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=0.0,
+                    exit_code=1,
+                    aux_metrics={
+                        "failure_reason": "exception",
+                        "error": str(e),
+                        "command": command,
+                        "working_directory": project_path,
+                    },
+                )
+            )
 
-    return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
+    if name == "compare_metrics":
+        return text_response(
+            compare_metrics_payload(
+                float(arguments["baseline"]),
+                float(arguments["current"]),
+                arguments["metric_key"],
+                float(arguments.get("threshold_percent", 1.0)),
+            )
+        )
+
+    return text_response({"success": False, "error": f"Unknown tool: {name}"})
 
 
 async def main():
@@ -123,4 +242,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

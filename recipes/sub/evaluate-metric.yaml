@@ -1,8 +1,8 @@
 version: "1.0.0"
 title: "Metric Evaluation Sub-Recipe"
 description: |
-  벤치마크를 실행하고 baseline과 비교하여 keep/revert를 판정합니다.
-  Autoresearch loop의 Step 3-5에 해당합니다.
+  선택형 adapter용 서브 recipe입니다.
+  공식 v1 기본 flow는 메인 autoresearch-loop.yaml 하나이며, 이 sub-recipe는 같은 benchmark payload 계약을 재사용하는 보조 블록입니다.
 
 parameters:
   - key: project_path
@@ -37,47 +37,36 @@ extensions:
 
   - type: stdio
     name: metric-benchmark
-    cmd: python
+    cmd: __PYTHON_CMD__
     args:
-      - "/Users/nanbada/projects/Angella/mcp-servers/metric_benchmark.py"
+      - "__ANGELLA_ROOT__/mcp-servers/metric_benchmark.py"
     timeout: 300
 
 instructions: |
-  당신은 벤치마크 평가자입니다. 코드 변경 후 메트릭을 측정하고 개선 여부를 판정합니다.
+  당신은 벤치마크 평가자입니다. 이 sub-recipe는 이미 생성된 candidate commit을 keep/revert하는 보조 단계입니다.
 
   ## 작업 순서
+  1. `run_benchmark`를 호출합니다.
+     - command: "{{ benchmark_command }}"
+     - metric_key: "{{ metric_key }}"
+     - working_directory: "{{ project_path }}"
+  2. benchmark payload의 `success`를 먼저 확인합니다.
+     - `success=false`면 `git revert HEAD --no-edit`를 실행합니다.
+     - baseline은 유지합니다.
+     - action은 `failure`로 기록합니다.
+  3. benchmark가 성공했을 때만 `compare_metrics`를 호출합니다.
+     - baseline: {{ baseline_value }}
+     - current: 측정된 `metric_value`
+     - metric_key: "{{ metric_key }}"
+     - threshold_percent: {{ threshold_percent }}
+  4. 개선이면 keep합니다.
+  5. 개선이 아니면 `git revert HEAD --no-edit`로 되돌립니다.
 
-  ### 1. 벤치마크 실행
-  `run_benchmark` 도구를 호출합니다:
-  - command: "{{ benchmark_command }}"
-  - metric_key: "{{ metric_key }}"
-  - working_directory: "{{ project_path }}"
-
-  ### 2. 비교 판정
-  `compare_metrics` 도구를 호출합니다:
-  - baseline: {{ baseline_value }}
-  - current: (측정된 값)
-  - metric_key: "{{ metric_key }}"
-  - threshold_percent: {{ threshold_percent }}
-
-  ### 3. 결과에 따른 액션
-
-  #### ✅ 개선됨 (is_improved = true)
-  - "Ratchet forward: 개선 확인됨" 메시지를 출력합니다.
-  - 새 baseline 값을 반환합니다.
-
-  #### ❌ 개선 안됨 (is_improved = false)
-  - `git revert HEAD --no-edit`로 마지막 commit을 되돌립니다.
-  - "Reverted: 개선 없음" 메시지를 출력합니다.
-  - 이전 baseline 값을 그대로 반환합니다.
-
-  ### 4. 결과 반환
-  다음 형식으로 결과를 반환합니다:
-  ```
-  EVALUATION_RESULT:
-  - current_metric: <측정된 값>
-  - baseline: {{ baseline_value }}
-  - is_improved: <true/false>
-  - action_taken: <keep/revert>
-  - new_baseline: <새 baseline 또는 기존 baseline>
-  ```
+  ## 반환 형식
+  아래 항목을 반드시 포함해 요약합니다.
+  - current_metric
+  - baseline
+  - is_improved
+  - action_taken (`keep`, `revert`, `failure`)
+  - new_baseline
+  - failure_reason

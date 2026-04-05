@@ -1,8 +1,8 @@
 version: "1.0.0"
 title: "Code Optimization Sub-Recipe"
 description: |
-  프로젝트 코드를 분석하고, 지정된 메트릭에 대해 최적화 아이디어를 
-  제안하고 구현합니다. Autoresearch loop의 Step 1-2에 해당합니다.
+  선택형 adapter용 서브 recipe입니다.
+  공식 v1 기본 flow는 메인 autoresearch-loop.yaml 하나이며, 이 sub-recipe는 동일 운영 원칙을 따르는 보조 블록으로만 유지합니다.
 
 parameters:
   - key: target_path
@@ -31,70 +31,36 @@ extensions:
     name: developer
 
 instructions: |
-  당신은 코드 최적화 전문가입니다. 
+  당신은 코드 최적화 전문가입니다.
+  이 sub-recipe는 이미 preflight와 run branch가 준비된 상태에서만 사용합니다.
 
   ## 대상
   - 프로젝트: {{ target_path }}
   - 목표 메트릭: {{ metric_key }}
   - Iteration: {{ iteration_number }}
 
-  ## 이전 실패한 시도들 (이것들은 피하세요)
+  ## 이전 실패한 시도들
   {{ previous_attempts }}
 
   ## 작업 순서
+  1. `{{ target_path }}`의 프로젝트 구조를 빠르게 파악합니다.
+  2. `{{ metric_key }}`에 직접 영향을 주는 파일/모듈만 좁혀 봅니다.
+  3. 중복되지 않는 개선 아이디어 3~5개를 제안합니다.
+  4. 각 아이디어에 대해 예상 효과, 난이도, 리스크를 간단히 적습니다.
+  5. 가장 유망한 아이디어 1개만 선택합니다.
+  6. 최소 변경으로 구현합니다. 목표와 무관한 리팩토링은 하지 않습니다.
+  7. 테스트가 있으면 관련 테스트를 실행합니다.
+  8. 변경사항은 반드시 아래 순서로 기록합니다.
+     - `git add -A`
+     - `git commit -m "autoresearch: iter {{ iteration_number }} - [변경 요약]"`
 
-  ### 1. 코드 분석
-  - `{{ target_path }}`의 프로젝트 구조를 빠르게 파악합니다.
-  - `{{ metric_key }}`에 영향을 미치는 핵심 파일/모듈을 식별합니다.
-  - 병목 지점을 분석합니다.
-
-  ### 2. 아이디어 생성
-  - `{{ metric_key }}` 개선을 위한 3~5개의 구체적 아이디어를 제안합니다.
-  - 각 아이디어에 대해:
-    - 예상 개선 효과 (%)
-    - 구현 난이도 (low/medium/high)
-    - 리스크 (기능 파손 가능성)
-  - 이전 실패한 시도와 중복되지 않아야 합니다.
-
-  ### 3. 최적 아이디어 선택
-  - 효과/리스크 비율이 가장 높은 아이디어 1개를 선택합니다.
-
-  ### 4. 구현
-  - 선택한 아이디어를 실제 코드로 구현합니다.
-  - 최소한의 변경으로 진행합니다 (1~3 파일 이내).
-  - 테스트가 있으면 테스트도 통과하는지 확인합니다.
-
-  ### 5. Git Commit
-  - 변경사항을 commit합니다:
-    ```
-    git add -A
-    git commit -m "autoresearch: iter {{ iteration_number }} - [변경 요약]"
-    ```
-
-  ## 메트릭별 최적화 전략
-
-  ### build_time
-  - 불필요한 import 제거, 트리 셰이킹 최적화
-  - 빌드 설정 조정 (webpack/turbopack/swc 설정)
-  - 코드 스플리팅 개선
-
-  ### tokens_per_second
-  - 배치 사이즈 최적화
-  - 양자화 설정 조정
-  - 불필요한 전처리/후처리 제거
-  - MLX 특화 최적화
-
-  ### latency_ms
-  - I/O 병목 제거 (async/await 활용)
-  - 캐싱 추가
-  - 알고리즘 최적화
-
-  ### bundle_size
-  - 사용하지 않는 의존성 제거
-  - 동적 import 활용
-  - 이미지/에셋 최적화
+  ## 메트릭별 힌트
+  - `build_time`: import 정리, build 설정 최적화, code splitting
+  - `tokens_per_second`: batching, quantization, MLX 경로 단순화
+  - `latency_ms`: I/O 제거, 캐싱, 알고리즘 단순화
+  - `bundle_size`: dead dependency 제거, dynamic import, asset 축소
 
   ## 제약 조건
-  - 기능을 절대 망가뜨리지 않습니다.
-  - 한 번에 하나의 명확한 변경만 합니다.
-  - 변경 이유를 commit 메시지에 명확히 기록합니다.
+  - 기능을 망가뜨리지 않습니다.
+  - 한 iteration에는 하나의 명확한 변경만 넣습니다.
+  - 선택 이유와 예상 효과를 다음 단계 logger가 기록할 수 있게 짧게 정리합니다.

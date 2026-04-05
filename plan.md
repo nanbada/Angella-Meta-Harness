@@ -2,7 +2,7 @@
 
 ## 1. 문서 목적
 
-이 문서는 [`reference.md`](/Users/nanbada/projects/Angella/reference.md)의 최초 요청사항을 현재 저장소 기준으로 재구성한 계획 문서다. 목표는 두 가지다.
+이 문서는 [`reference.md`](reference.md)의 최초 요청사항을 현재 저장소 기준으로 재구성한 계획 문서다. 목표는 두 가지다.
 
 1. 원래 의도였던 Goose 기반 로컬 자율 최적화 시스템의 방향을 보존한다.
 2. 현재 실제 구현 상태와 미래 확장 구상을 분리해서 설계-구현 불일치를 줄인다.
@@ -63,17 +63,17 @@ iteration별 metric, git diff, verdict를 남겨야 한다. 그래야 실패를 
 
 저장소에는 다음 구성요소가 있다.
 
-- [`setup.sh`](/Users/nanbada/projects/Angella/setup.sh)
+- [`setup.sh`](setup.sh)
   Goose CLI, Ollama, 모델, Python MCP 의존성, 렌더된 Goose config를 설치한다.
-- [`config/goose-config.yaml`](/Users/nanbada/projects/Angella/config/goose-config.yaml)
+- [`config/goose-config.yaml`](config/goose-config.yaml)
   Goose 전역 설정 템플릿이다.
-- [`recipes/autoresearch-loop.yaml`](/Users/nanbada/projects/Angella/recipes/autoresearch-loop.yaml)
+- [`recipes/autoresearch-loop.yaml`](recipes/autoresearch-loop.yaml)
   메인 ratchet loop recipe 템플릿이다.
-- [`mcp-servers/metric_benchmark.py`](/Users/nanbada/projects/Angella/mcp-servers/metric_benchmark.py)
+- [`mcp-servers/metric_benchmark.py`](mcp-servers/metric_benchmark.py)
   benchmark 실행과 metric 비교를 담당한다.
-- [`mcp-servers/obsidian_auto_log.py`](/Users/nanbada/projects/Angella/mcp-servers/obsidian_auto_log.py)
+- [`mcp-servers/obsidian_auto_log.py`](mcp-servers/obsidian_auto_log.py)
   iteration 로그와 최종 보고서를 저장한다.
-- [`.env.mlx`](/Users/nanbada/projects/Angella/.env.mlx)
+- [`.env.mlx`](.env.mlx)
   MLX/Ollama/Goose 관련 환경 변수를 제공한다.
 
 현재 구현은 "Goose + Ollama + MCP" 경로에는 도달해 있다. 반면 `apfel`과 다중 provider routing은 아직 제품 설계상 후보이며, 실제 기본 경로는 아니다.
@@ -101,6 +101,20 @@ iteration별 metric, git diff, verdict를 남겨야 한다. 그래야 실패를 
 
 즉 모델은 교체 가능해야 하고, loop와 evidence는 고정되어야 한다.
 
+### 6.3 v1 운영 계약
+
+실제 구현 단계에서는 아래 계약을 고정한다.
+
+- 공식 기본 flow는 `recipes/autoresearch-loop.yaml` 하나다.
+- 기본 실행 경로는 Goose + Ollama + generic benchmark MCP + logger MCP다.
+- 프로젝트별 benchmark MCP와 `recipes/sub/*.yaml`은 같은 계약을 만족하는 선택형 adapter다.
+- 루프는 clean Git 저장소에서만 시작한다.
+- 모든 run은 전용 브랜치 `angella/run-<timestamp>`에서 수행한다.
+- baseline 전에 `run_id`, `start_commit`, Intent Contract를 고정한다.
+- benchmark 계층은 `success`, `metric_key`, `metric_value`, `duration_seconds`, `exit_code`, `stdout_tail`, `stderr_tail`, `aux_metrics`를 공통 출력으로 사용한다.
+- benchmark non-zero exit, parse 실패, timeout은 모두 failure iteration이며 baseline을 갱신하지 않는다.
+- transparency는 날짜 단위 로그가 아니라 run-scoped log를 기준으로 남긴다.
+
 ## 7. 핵심 설계 원칙
 
 ### 7.1 이식성 우선
@@ -126,6 +140,16 @@ setup, config, benchmark, logging, reporting을 제품 기능으로 취급한다
 ### 7.6 구현과 비전 분리
 
 문서는 현재 지원 기능과 미래 구상을 분리해서 적어야 한다. 아직 지원하지 않는 `apfel` 경로를 기본 동작처럼 문서화하면 안 된다.
+
+### 7.7 실행 계약 우선
+
+설계 문서만이 아니라 setup, recipe, MCP, README가 같은 계약을 공유해야 한다. 특히 다음은 문서 표현이 아니라 실제 인터페이스로 취급한다.
+
+- `setup.sh --yes`, `setup.sh --check`
+- template placeholder 렌더링 규칙
+- benchmark/logger payload 스키마
+- dirty worktree 차단 정책
+- run branch와 run_id 기록 규칙
 
 ## 8. 설계 결함과 교정 방향
 

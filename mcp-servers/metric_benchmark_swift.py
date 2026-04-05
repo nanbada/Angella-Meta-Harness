@@ -1,99 +1,131 @@
 #!/usr/bin/env python3
-"""
-Swift / SwiftUI Metric Benchmark MCP Server
-=============================================
-Swift 빌드 시간 + 앱 launch time 측정 (macOS / Xcode).
-"""
+"""Swift benchmark adapter with the shared benchmark schema."""
 
+import os
+import re
 import subprocess
 import time
-import re
-import json
-import os
 
+from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp import types
+
+from common import (
+    SUPPORTED_METRICS,
+    build_benchmark_payload,
+    compare_metrics_payload,
+    text_response,
+)
 
 server = Server("metric-benchmark-swift")
 
 
 def _parse_xcode_log(stdout: str, stderr: str) -> dict:
-    """Xcode 빌드 로그에서 메트릭 추출"""
     combined = stdout + stderr
     metrics = {
         "compile_time_seconds": 0.0,
-        "link_time_seconds": 0.0,
-        "warning_count": 0,
-        "error_count": 0,
+        "warning_count": len(re.findall(r"warning:", combined)),
+        "error_count": len(re.findall(r"error:", combined)),
+        "launch_time_ms": 0.0,
     }
 
-    # CompileSwiftSources timing
     compile_match = re.search(r"CompileSwift.*?(\d+\.\d+)\s*seconds", combined)
     if compile_match:
         metrics["compile_time_seconds"] = float(compile_match.group(1))
 
-    # Warnings & Errors
-    metrics["warning_count"] = len(re.findall(r"warning:", combined))
-    metrics["error_count"] = len(re.findall(r"error:", combined))
+    latency_match = re.search(
+        r"(?:launch time|startup time|latency)[:\s]+([0-9]+\.?[0-9]*)\s*ms",
+        combined,
+        re.IGNORECASE,
+    )
+    if latency_match:
+        metrics["launch_time_ms"] = float(latency_match.group(1))
 
     return metrics
+
+
+def _run_clean_step(project_path: str, scheme: str, build_command: str) -> tuple[bool, str]:
+    if "xcodebuild" in build_command:
+        clean_command = "xcodebuild clean"
+        if scheme:
+            clean_command = f"xcodebuild -scheme {scheme} clean"
+    elif build_command.strip().startswith("swift "):
+        clean_command = "swift package clean"
+    else:
+        return False, "clean_build_requested_without_safe_clean_command"
+
+    clean_result = subprocess.run(
+        clean_command,
+        shell=True,
+        capture_output=True,
+        text=True,
+        cwd=project_path,
+        timeout=120,
+        env={**os.environ},
+    )
+    return clean_result.returncode == 0, clean_result.stderr[-400:] or clean_result.stdout[-400:]
 
 
 @server.list_tools()
 async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
-            name="benchmark_swift",
-            description="Swift/SwiftUI 프로젝트의 빌드 시간을 측정합니다 (xcodebuild 또는 swift build).",
+            name="run_benchmark",
+            description="Swift 프로젝트를 측정하고 공통 benchmark payload를 반환합니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "project_path": {
+                    "command": {
+                        "type": "string",
+                        "description": "빌드 또는 측정 명령어",
+                        "default": "swift build -c release",
+                    },
+                    "metric_key": {
+                        "type": "string",
+                        "enum": ["build_time", "latency_ms"],
+                        "default": "build_time",
+                    },
+                    "working_directory": {
                         "type": "string",
                         "description": "프로젝트 루트 경로",
                     },
-                    "build_command": {
-                        "type": "string",
-                        "description": "빌드 명령어",
-                        "default": "swift build -c release",
-                    },
                     "scheme": {
                         "type": "string",
-                        "description": "Xcode scheme 이름 (xcodebuild 사용 시)",
+                        "description": "xcodebuild 사용 시 scheme",
                         "default": "",
                     },
                     "clean_build": {
                         "type": "boolean",
-                        "description": "클린 빌드 여부 (DerivedData 삭제)",
+                        "description": "안전한 clean command 실행 여부",
                         "default": False,
-                    },
-                },
-                "required": ["project_path"],
-            },
-        ),
-        types.Tool(
-            name="measure_launch_time",
-            description="빌드된 앱/바이너리의 launch time을 측정합니다.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "binary_path": {
-                        "type": "string",
-                        "description": "실행할 바이너리 경로 (예: .build/release/MyApp)",
-                    },
-                    "args": {
-                        "type": "string",
-                        "description": "바이너리에 전달할 인자",
-                        "default": "",
                     },
                     "timeout_seconds": {
                         "type": "integer",
                         "description": "최대 실행 시간 (초)",
-                        "default": 30,
+                        "default": 600,
                     },
                 },
-                "required": ["binary_path"],
+                "required": ["working_directory"],
+            },
+        ),
+        types.Tool(
+            name="compare_metrics",
+            description="두 메트릭 값을 비교하여 개선 여부를 판정합니다.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "baseline": {"type": "number"},
+                    "current": {"type": "number"},
+                    "metric_key": {
+                        "type": "string",
+                        "enum": list(SUPPORTED_METRICS),
+                    },
+                    "threshold_percent": {
+                        "type": "number",
+                        "default": 1.0,
+                    },
+                },
+                "required": ["baseline", "current", "metric_key"],
             },
         ),
     ]
@@ -101,88 +133,165 @@ async def list_tools() -> list[types.Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    if name == "benchmark_swift":
-        project_path = os.path.expanduser(arguments["project_path"])
-        build_cmd = arguments.get("build_command", "swift build -c release")
-        scheme = arguments.get("scheme", "")
-        clean_build = arguments.get("clean_build", False)
+    if name in {"run_benchmark", "benchmark_swift", "measure_launch_time"}:
+        if name == "measure_launch_time":
+            project_path = os.path.expanduser(os.path.dirname(arguments["binary_path"]) or ".")
+            command = f'"{os.path.expanduser(arguments["binary_path"])}" {arguments.get("args", "")}'.strip()
+            metric_key = "latency_ms"
+            scheme = ""
+            clean_build = False
+            timeout = int(arguments.get("timeout_seconds", 30))
+        elif name == "benchmark_swift":
+            project_path = os.path.expanduser(arguments["project_path"])
+            command = arguments.get("build_command", "swift build -c release")
+            metric_key = arguments.get("metric_key", "build_time")
+            scheme = arguments.get("scheme", "")
+            clean_build = bool(arguments.get("clean_build", False))
+            timeout = int(arguments.get("timeout_seconds", 600))
+        else:
+            project_path = os.path.expanduser(arguments["working_directory"])
+            command = arguments.get("command", "swift build -c release")
+            metric_key = arguments.get("metric_key", "build_time")
+            scheme = arguments.get("scheme", "")
+            clean_build = bool(arguments.get("clean_build", False))
+            timeout = int(arguments.get("timeout_seconds", 600))
+
+        if metric_key not in {"build_time", "latency_ms"}:
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=0.0,
+                    exit_code=2,
+                    aux_metrics={"failure_reason": "unsupported_metric_for_swift"},
+                )
+            )
+
+        if not os.path.isdir(project_path):
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=0.0,
+                    exit_code=2,
+                    aux_metrics={
+                        "failure_reason": "working_directory_not_found",
+                        "working_directory": project_path,
+                    },
+                )
+            )
 
         try:
-            # Clean build: DerivedData 삭제
             if clean_build:
-                derived = os.path.expanduser("~/Library/Developer/Xcode/DerivedData")
-                subprocess.run(f"rm -rf {derived}/*", shell=True, timeout=30)
+                clean_ok, clean_detail = _run_clean_step(project_path, scheme, command)
+                if not clean_ok:
+                    return text_response(
+                        build_benchmark_payload(
+                            success=False,
+                            metric_key=metric_key,
+                            metric_value=0.0,
+                            duration_seconds=0.0,
+                            exit_code=2,
+                            aux_metrics={
+                                "failure_reason": clean_detail,
+                                "command": command,
+                                "working_directory": project_path,
+                            },
+                        )
+                    )
 
-            # xcodebuild 사용 시 scheme 추가
-            if scheme and "xcodebuild" in build_cmd:
-                build_cmd = f"xcodebuild -scheme {scheme} -destination 'platform=macOS' build"
+            if scheme and "xcodebuild" in command and "-scheme" not in command:
+                command = f"xcodebuild -scheme {scheme} -destination 'platform=macOS' build"
 
             start = time.time()
             result = subprocess.run(
-                build_cmd,
+                command,
                 shell=True,
                 capture_output=True,
                 text=True,
                 cwd=project_path,
-                timeout=600,  # Swift 빌드는 오래 걸릴 수 있음
+                timeout=timeout,
                 env={**os.environ},
             )
-            build_time = round(time.time() - start, 3)
+            duration = time.time() - start
 
-            xcode_metrics = _parse_xcode_log(result.stdout, result.stderr)
+            parsed = _parse_xcode_log(result.stdout, result.stderr)
+            metric_value = duration if metric_key == "build_time" else parsed["launch_time_ms"]
+            metric_found = metric_key == "build_time" or parsed["launch_time_ms"] > 0
+            success = result.returncode == 0 and metric_found
 
-            output = {
-                "metric_key": "build_time",
-                "metric_value": build_time,
-                "build_time_seconds": build_time,
-                "compile_time_seconds": xcode_metrics["compile_time_seconds"],
-                "warnings": xcode_metrics["warning_count"],
-                "errors": xcode_metrics["error_count"],
-                "success": result.returncode == 0,
-                "clean_build": clean_build,
-                "log": result.stdout[-800:],
-            }
+            failure_reason = ""
+            if result.returncode != 0:
+                failure_reason = "command_failed"
+            elif not metric_found:
+                failure_reason = "metric_parse_failed"
 
-            return [types.TextContent(type="text", text=json.dumps(output, indent=2, ensure_ascii=False))]
-
-        except subprocess.TimeoutExpired:
-            return [types.TextContent(type="text", text=json.dumps({"error": "Build timeout (600s)", "success": False}))]
-        except Exception as e:
-            return [types.TextContent(type="text", text=json.dumps({"error": str(e), "success": False}))]
-
-    elif name == "measure_launch_time":
-        binary_path = os.path.expanduser(arguments["binary_path"])
-        args = arguments.get("args", "")
-        timeout = arguments.get("timeout_seconds", 30)
-
-        try:
-            cmd = f"{binary_path} {args}".strip()
-            start = time.time()
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
+            return text_response(
+                build_benchmark_payload(
+                    success=success,
+                    metric_key=metric_key,
+                    metric_value=metric_value,
+                    duration_seconds=duration,
+                    exit_code=result.returncode,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    aux_metrics={
+                        "command": command,
+                        "working_directory": project_path,
+                        "clean_build": clean_build,
+                        "compile_time_seconds": parsed["compile_time_seconds"],
+                        "warning_count": parsed["warning_count"],
+                        "error_count": parsed["error_count"],
+                        "launch_time_ms": parsed["launch_time_ms"],
+                        "failure_reason": failure_reason,
+                    },
+                )
             )
-            launch_time = round((time.time() - start) * 1000, 2)  # ms
-
-            output = {
-                "metric_key": "latency_ms",
-                "metric_value": launch_time,
-                "launch_time_ms": launch_time,
-                "success": result.returncode == 0,
-                "stdout": result.stdout[:500],
-            }
-
-            return [types.TextContent(type="text", text=json.dumps(output, indent=2, ensure_ascii=False))]
-
         except subprocess.TimeoutExpired:
-            return [types.TextContent(type="text", text=json.dumps({"error": f"Launch timeout ({timeout}s)", "success": False}))]
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=float(timeout),
+                    exit_code=124,
+                    aux_metrics={
+                        "failure_reason": "timeout",
+                        "command": command,
+                        "working_directory": project_path,
+                    },
+                )
+            )
         except Exception as e:
-            return [types.TextContent(type="text", text=json.dumps({"error": str(e), "success": False}))]
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=0.0,
+                    exit_code=1,
+                    aux_metrics={
+                        "failure_reason": "exception",
+                        "error": str(e),
+                        "command": command,
+                        "working_directory": project_path,
+                    },
+                )
+            )
 
-    return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
+    if name == "compare_metrics":
+        return text_response(
+            compare_metrics_payload(
+                float(arguments["baseline"]),
+                float(arguments["current"]),
+                arguments["metric_key"],
+                float(arguments.get("threshold_percent", 1.0)),
+            )
+        )
+
+    return text_response({"success": False, "error": f"Unknown tool: {name}"})
 
 
 async def main():
@@ -192,4 +301,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

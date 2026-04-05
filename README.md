@@ -1,162 +1,200 @@
-# 🦆 Angella — M3 Autoresearch Self-Optimize Loop
+# Angella
 
-MacBook Pro M3 36GB에서 [Goose](https://github.com/block/goose)를 활용한 **Karpathy Autoresearch 스타일 Self-Optimize Loop** 시스템입니다.
+MacBook Pro M3 36GB에서 [Goose](https://github.com/block/goose)를 활용해 실행하는 로컬 self-optimize loop입니다.
 
-코드 수정 → 벤치마크 → baseline 대비 개선되면 keep(commit), 아니면 revert.  
-이것을 자동으로 최대 15회 반복합니다.
+공식 v1 경로는 `Goose + Ollama + generic benchmark MCP + logger MCP`입니다. 프로젝트별 benchmark MCP와 sub-recipe는 같은 계약을 만족하는 선택형 adapter로만 유지하며, 기본 실행 흐름은 [`recipes/autoresearch-loop.yaml`](recipes/autoresearch-loop.yaml) 하나로 고정합니다.
 
-Angella의 핵심은 모델 자체보다 **좋은 최적화 루프와 스캐폴딩**입니다. 현재 기본 경로는 Goose + Ollama + MCP이며, `apfel` 같은 네이티브 provider 통합은 후속 확장 대상으로 유지합니다.
+## 핵심 동작
 
-## 🏗 아키텍처
+Angella는 clean Git 저장소에서만 시작합니다.
 
-```
-┌──────────────────────────────────────────┐
-│             Goose Agent                   │
-│  Lead: Gemini 2.5 Pro (Intent/Plan)      │
-│  Worker: Qwen 2.5 Coder 32B (Code/MLX)  │
-├──────────────────────────────────────────┤
-│                                          │
-│  ┌─────────────┐    ┌─────────────────┐  │
-│  │  Developer   │    │ Metric Benchmark│  │
-│  │  Extension   │    │  MCP Server     │  │
-│  │  (builtin)   │    │  (stdio)        │  │
-│  └─────────────┘    └─────────────────┘  │
-│                                          │
-│  ┌─────────────────────────────────────┐ │
-│  │    Obsidian Auto-Log MCP Server     │ │
-│  │    (Transparency / Logging)         │ │
-│  └─────────────────────────────────────┘ │
-└──────────────────────────────────────────┘
+1. 대상 프로젝트가 Git 저장소인지 확인합니다.
+2. tracked 변경과 untracked 파일을 포함해 worktree가 깨끗한지 확인합니다.
+3. 현재 브랜치가 아니라 `angella/run-<timestamp>` 전용 실행 브랜치를 만듭니다.
+4. Intent Contract를 고정하고 baseline을 측정합니다.
+5. edit → benchmark → keep/revert를 반복합니다.
+6. 모든 iteration을 `run_id` 기준 로그와 final report로 남깁니다.
+
+핵심은 모델을 많이 붙이는 것이 아니라, 작은 가설과 객관적 메트릭, 안전한 revert, 투명한 run-scoped 로그를 유지하는 것입니다.
+
+## 빠른 시작
+
+### 1. 사전 점검
+
+```bash
+bash setup.sh --check
 ```
 
-## ⚡️ 빠른 시작
+이 모드는 설치 없이 아래만 검증합니다.
 
-### 1. 환경 셋업
+- 필수 런타임 존재 여부
+- Python/pip 사용 가능 여부
+- Angella 템플릿 렌더링 가능 여부
+- placeholder 또는 개발자 전용 절대 경로 누락 여부
+
+### 2. 설치
+
 ```bash
 bash setup.sh
 ```
 
-이 스크립트가 자동으로:
-- Goose CLI 설치 (없으면)
-- Ollama 모델 풀 (qwen2.5-coder:32b, gemma4:26b)
-- MCP 실행에 사용할 Python 인터프리터 탐지 및 의존성 설치
-- Goose config와 렌더된 recipe 설치
-- 로그 디렉토리 생성
+무인 설치가 필요하면 아래를 사용합니다.
 
-### 2. Gemini API Key 설정
 ```bash
-export GOOGLE_API_KEY=your_api_key_here
-# 또는 쉘 프로필에 미리 등록
-# 또는
-goose configure  # → Configure Providers → Google Gemini
+bash setup.sh --yes
 ```
 
-### 3. Autoresearch Loop 실행
+`setup.sh`는 다음을 수행합니다.
+
+- Goose CLI 확인 또는 Homebrew 설치
+- Ollama 확인 및 서버 시작 여부 점검
+- `qwen2.5-coder:32b`, `gemma4:26b` 모델 확인
+- MCP 서버용 Python interpreter 및 pip 확인
+- Python 의존성 설치
+- Goose config와 recipe/sub-recipe 렌더링
+- Angella 로그 디렉토리 생성
+
+### 3. 환경 변수 적용
+
 ```bash
-# MLX 환경변수 적용
 source .env.mlx
-
-# Ollama 서버 실행 (이미 실행 중이 아니면)
-ollama serve &
-
-# setup.sh가 생성한 렌더된 recipe로 Goose 세션 시작
-goose session --recipe ~/.config/goose/recipes/autoresearch-loop.yaml
 ```
 
-파라미터 입력:
-- `target_project_path`: 최적화할 프로젝트 경로
-- `objective_metric`: build_time / tokens_per_second / latency_ms / bundle_size
-- `benchmark_command`: 벤치마크 명령어 (예: `npm run build`)
+`.env.mlx`는 `ANGELLA_ROOT`와 `OBSIDIAN_VAULT_PATH`를 결정적으로 설정합니다. 별도 override가 없으면 로그는 Angella 설치 경로 하위 `logs/`에 저장됩니다.
 
-## 🎯 설계 원칙
+### 4. Gemini credential 확인
 
-- 요청을 바로 수정하지 않고 먼저 최적화 의도와 metric을 정리합니다.
-- 각 iteration은 하나의 가설만 구현하고 metric으로 판정합니다.
-- 개선되지 않으면 revert하고, 개선 근거와 diff를 로그로 남깁니다.
-- 현재 지원 기능과 미래 확장 기능을 문서에서 분리합니다.
+Angella는 `GOOSE_LEAD_PROVIDER=google` 기본값을 사용합니다. `setup.sh`는 `GOOGLE_API_KEY`를 쓰거나 저장하지 않고 존재 여부만 안내합니다.
 
-## ✅ 현재 지원 범위
+직접 설정하려면:
 
-- Goose를 orchestration layer로 사용
-- Ollama 기반 `qwen2.5-coder:32b`, `gemma4:26b` 설치 및 실행
-- benchmark MCP와 compare_metrics 기반 ratchet loop
-- iteration 로그 및 final report 저장
-- setup 기반 로컬 설치와 렌더된 Goose config/recipe 배포
-
-## 🧪 후속 확장 후보
-
-- `apfel` 기반 native provider 통합
-- 역할별 provider routing
-- intent clarification 강화
-- transparency 로그 구조 고도화
-- benchmark parser 정밀도 개선
-
-## 📁 프로젝트 구조
-
+```bash
+goose configure
 ```
+
+또는 셸에서 미리 export 합니다.
+
+### 5. Autoresearch loop 실행
+
+```bash
+goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s
+```
+
+입력 파라미터:
+
+- `target_project_path`: 최적화할 프로젝트의 절대 경로
+- `objective_metric`: `build_time`, `tokens_per_second`, `latency_ms`, `bundle_size`
+- `benchmark_command`: 실제 benchmark 명령
+- `max_iterations`: 최대 반복 횟수
+- `improvement_threshold`: keep 판정 임계값
+
+예시:
+
+```bash
+goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s \
+  --params target_project_path=/absolute/path/to/project \
+  --params objective_metric=build_time \
+  --params benchmark_command='npm run build'
+```
+
+## Intent Contract
+
+루프는 baseline 전에 아래 계약을 고정합니다.
+
+- `intent_summary`
+- `metric_reason`
+- `non_goals`
+- `success_threshold`
+- `first_hypotheses`
+
+이 값은 baseline 로그와 final report에 모두 기록됩니다.
+
+## Benchmark Contract
+
+기본 benchmark MCP와 프로젝트별 adapter는 모두 같은 핵심 payload를 반환해야 합니다.
+
+- `success`
+- `metric_key`
+- `metric_value`
+- `duration_seconds`
+- `exit_code`
+- `stdout_tail`
+- `stderr_tail`
+- `aux_metrics`
+
+판정 규칙:
+
+- `success=false`면 실패 iteration입니다.
+- benchmark non-zero exit, metric parse 실패, timeout은 모두 revert 대상입니다.
+- 실패 iteration은 baseline을 갱신하지 않습니다.
+
+## Git 운영 규칙
+
+- dirty worktree에서는 시작하지 않습니다.
+- 사용자의 현재 브랜치에서 직접 수정하지 않습니다.
+- 각 run은 `angella/run-<timestamp>` 브랜치에서 수행합니다.
+- 각 iteration은 candidate commit 생성 후 benchmark를 거쳐 keep 또는 `git revert HEAD --no-edit`로 정리합니다.
+- run 종료 후 자동으로 원래 브랜치로 돌아가지 않습니다.
+
+## 로그와 Transparency
+
+기본 로그 경로:
+
+`$ANGELLA_ROOT/logs/Goose Logs/`
+
+환경변수 `OBSIDIAN_VAULT_PATH`를 주면 그 경로를 우선합니다.
+
+생성 파일:
+
+- `<run_id>.md`: baseline, iteration별 keep/revert/failure 기록
+- `<run_id>-FINAL.md`: 최종 결과와 전체 diff 요약
+
+로그에는 다음이 포함됩니다.
+
+- `run_id`
+- `start_commit`
+- `candidate_commit`
+- `decision`
+- `improvement_percent`
+- `benchmark_command`
+- `working_directory`
+- `failure_reason`
+- Intent Contract
+
+## 프로젝트별 Adapter
+
+기본 flow는 generic benchmark MCP를 사용합니다. 아래 adapter는 같은 출력 계약과 `run_benchmark`/`compare_metrics` 인터페이스를 제공하는 선택형 대체재입니다.
+
+| 프로젝트 | 서버 파일 | 주요 metric |
+|----------|-----------|-------------|
+| Next.js | [`mcp-servers/metric_benchmark_nextjs.py`](mcp-servers/metric_benchmark_nextjs.py) | `build_time`, `bundle_size` |
+| Python/MLX | [`mcp-servers/metric_benchmark_python.py`](mcp-servers/metric_benchmark_python.py) | `tokens_per_second`, `latency_ms` |
+| Swift/SwiftUI | [`mcp-servers/metric_benchmark_swift.py`](mcp-servers/metric_benchmark_swift.py) | `build_time`, `latency_ms` |
+
+이 adapter들은 공식 기본 경로가 아니며, main recipe를 바꾸지 않고 교체 가능한 benchmark backend로만 취급합니다.
+
+## 프로젝트 구조
+
+```text
 Angella/
-├── setup.sh                        # 원클릭 셋업
-├── .env.mlx                        # MLX 환경변수
-├── .goosehints                     # Goose 프로젝트 힌트
-│
+├── setup.sh
+├── .env.mlx
+├── .goosehints
 ├── config/
-│   ├── goose-config.yaml           # Goose config 템플릿
-│   └── init-config.yaml            # Custom distro config
-│
+│   ├── goose-config.yaml
+│   └── init-config.yaml
 ├── recipes/
-│   ├── autoresearch-loop.yaml      # 메인 Autoresearch recipe
+│   ├── autoresearch-loop.yaml
 │   └── sub/
-│       ├── code-optimize.yaml      # 코드 최적화 서브레시피
-│       └── evaluate-metric.yaml    # 메트릭 평가 서브레시피
-│
+│       ├── code-optimize.yaml
+│       └── evaluate-metric.yaml
 ├── mcp-servers/
-│   ├── metric_benchmark.py         # 범용 벤치마크 MCP
-│   ├── metric_benchmark_nextjs.py  # Next.js 전용
-│   ├── metric_benchmark_python.py  # Python 전용
-│   ├── metric_benchmark_swift.py   # Swift 전용
-│   ├── obsidian_auto_log.py        # 로그 자동 저장 MCP
-│   └── requirements.txt            # Python 의존성
-│
-└── logs/                           # 자동 생성되는 로그 디렉토리
+│   ├── common.py
+│   ├── metric_benchmark.py
+│   ├── metric_benchmark_nextjs.py
+│   ├── metric_benchmark_python.py
+│   ├── metric_benchmark_swift.py
+│   ├── obsidian_auto_log.py
+│   └── requirements.txt
+└── logs/
 ```
-
-## 🔧 프로젝트별 벤치마크 MCP
-
-특정 프로젝트 유형에 맞는 MCP 서버를 사용하려면 recipe의 extensions에서 변경하세요:
-
-| 프로젝트 | MCP Server | Metric Key |
-|----------|-----------|------------|
-| Next.js | `metric_benchmark_nextjs.py` | `build_time`, `bundle_size` |
-| Python/MLX | `metric_benchmark_python.py` | `tokens_per_second`, `latency_ms` |
-| Swift/SwiftUI | `metric_benchmark_swift.py` | `build_time`, `latency_ms` |
-| 범용 | `metric_benchmark.py` | 모든 메트릭 |
-
-## 🔍 Intent Contract
-
-루프를 시작하기 전에 아래 4가지는 반드시 고정하는 것이 좋습니다.
-
-- 무엇을 최적화할지: 빌드 시간, latency, tokens/s, 번들 크기
-- 어떤 명령으로 측정할지: `benchmark_command`
-- 어느 수준부터 개선으로 볼지: `improvement_threshold`
-- 무엇을 희생하면 안 되는지: 기능 회귀, 테스트 실패, 불필요한 리팩토링
-
-## 🖥 M3 36GB 실전 체크리스트
-
-- [ ] `source .env.mlx` 적용 확인
-- [ ] Ollama MLX 로그에 `metal` 표시 확인
-- [ ] Activity Monitor에서 unified memory **28GB 이하** 유지
-- [ ] 첫 루프 전 baseline 직접 확인
-- [ ] Overnight loop 추천 (15회 기준 2~4시간 소요 예상)
-
-## 📝 로그 & Transparency
-
-매 iteration마다 자동으로 로그가 생성됩니다:
-- 위치: `./logs/Goose Logs/` (또는 Obsidian vault)
-- 형식: Markdown
-- 내용: iteration 번호, 메트릭, keep/revert 판정, git diff, 요약, 선택한 가설
-
-최종 보고서는 `*-FINAL.md` 파일로 저장됩니다.
-
-## 📄 라이선스
-
-이 프로젝트는 개인 사용 목적입니다. Goose는 [Apache 2.0](https://github.com/block/goose/blob/main/LICENSE) 라이선스입니다.

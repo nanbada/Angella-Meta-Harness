@@ -1,33 +1,73 @@
 #!/usr/bin/env python3
 """
-Obsidian Auto-Log MCP Server
-==============================
-Autoresearch loop의 Transparency를 구현합니다.
-매 iteration마다 ratchet 결과 + git diff + metric을 
-Obsidian vault (또는 로컬 logs/ 디렉토리)에 자동 저장.
+Run-scoped logging MCP for Angella transparency.
 
 환경변수:
-  OBSIDIAN_VAULT_PATH — Obsidian vault 경로 (기본값: ./logs)
+  OBSIDIAN_VAULT_PATH — 로그를 저장할 루트 경로
 """
 
 import datetime
-import os
 import json
+import os
+import re
 
+from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp import types
 
 server = Server("obsidian-auto-log")
+ANGELLA_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_VAULT_PATH = os.path.join(ANGELLA_ROOT, "logs")
 
-VAULT_PATH = os.environ.get("OBSIDIAN_VAULT_PATH", "./logs")
+
+def _resolve_vault_path() -> str:
+    configured = os.environ.get("OBSIDIAN_VAULT_PATH") or DEFAULT_VAULT_PATH
+    return os.path.abspath(os.path.expanduser(configured))
 
 
 def _get_log_dir() -> str:
-    """로그 디렉토리 경로 반환 (Goose Logs 하위)"""
-    log_dir = os.path.join(VAULT_PATH, "Goose Logs")
+    log_dir = os.path.join(_resolve_vault_path(), "Goose Logs")
     os.makedirs(log_dir, exist_ok=True)
     return log_dir
+
+
+def _safe_run_id(run_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", run_id).strip("-") or "angella-run"
+
+
+def _format_intent_contract(intent_contract: dict | None) -> str:
+    if not intent_contract:
+        return "_Not recorded_\n"
+
+    first_hypotheses = intent_contract.get("first_hypotheses", [])
+    if isinstance(first_hypotheses, list):
+        hypotheses_text = "\n".join(f"- {item}" for item in first_hypotheses) or "- _None_"
+    else:
+        hypotheses_text = str(first_hypotheses)
+
+    return (
+        f"- `intent_summary`: {intent_contract.get('intent_summary', '')}\n"
+        f"- `metric_reason`: {intent_contract.get('metric_reason', '')}\n"
+        f"- `non_goals`: {intent_contract.get('non_goals', '')}\n"
+        f"- `success_threshold`: {intent_contract.get('success_threshold', '')}\n"
+        f"- `first_hypotheses`:\n{hypotheses_text}\n"
+    )
+
+
+def _format_json_block(title: str, payload: dict | list | None) -> str:
+    if not payload:
+        return ""
+    return f"### {title}\n```json\n{json.dumps(payload, indent=2, ensure_ascii=False)}\n```\n\n"
+
+
+def _decision_label(decision: str) -> str:
+    mapping = {
+        "baseline": "BASELINE",
+        "keep": "KEEP",
+        "revert": "REVERT",
+        "failure": "FAILURE",
+    }
+    return mapping.get(decision, decision.upper())
 
 
 @server.list_tools()
@@ -35,93 +75,100 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="save_loop_log",
-            description="Self-Optimize Loop의 iteration 결과를 Obsidian vault (또는 로컬 로그)에 Markdown으로 저장합니다.",
+            description="Run-scoped loop iteration 결과를 Markdown으로 저장합니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "project_name": {
+                    "run_id": {"type": "string"},
+                    "project_name": {"type": "string"},
+                    "iteration": {"type": "integer"},
+                    "decision": {
                         "type": "string",
-                        "description": "프로젝트 이름",
+                        "description": "baseline, keep, revert, failure 중 하나",
                     },
-                    "iteration": {
-                        "type": "integer",
-                        "description": "현재 iteration 번호",
+                    "metric_key": {"type": "string"},
+                    "metric_value": {"type": "number"},
+                    "baseline_value": {"type": "number", "default": 0},
+                    "improvement_percent": {"type": "number", "default": 0},
+                    "start_commit": {"type": "string"},
+                    "candidate_commit": {"type": "string", "default": ""},
+                    "benchmark_command": {"type": "string"},
+                    "working_directory": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "failure_reason": {"type": "string", "default": ""},
+                    "git_diff": {"type": "string", "default": ""},
+                    "proposals": {"type": "string", "default": ""},
+                    "intent_contract": {
+                        "type": "object",
+                        "description": "Intent Contract 구조체",
+                        "default": {},
                     },
-                    "metric_key": {
-                        "type": "string",
-                        "description": "측정한 메트릭 키",
-                    },
-                    "metric_value": {
-                        "type": "number",
-                        "description": "현재 메트릭 값",
-                    },
-                    "baseline_value": {
-                        "type": "number",
-                        "description": "baseline 메트릭 값",
-                    },
-                    "improvement": {
-                        "type": "boolean",
-                        "description": "개선 여부 (keep/revert)",
-                    },
-                    "git_diff": {
-                        "type": "string",
-                        "description": "변경 사항 (git diff 출력)",
-                        "default": "",
-                    },
-                    "summary": {
-                        "type": "string",
-                        "description": "이번 iteration 요약",
-                    },
-                    "proposals": {
-                        "type": "string",
-                        "description": "시도한 개선 아이디어들",
-                        "default": "",
+                    "aux_metrics": {
+                        "type": "object",
+                        "description": "benchmark MCP가 반환한 보조 메트릭",
+                        "default": {},
                     },
                 },
-                "required": ["project_name", "iteration", "metric_key", "metric_value", "improvement", "summary"],
+                "required": [
+                    "run_id",
+                    "project_name",
+                    "iteration",
+                    "decision",
+                    "metric_key",
+                    "metric_value",
+                    "start_commit",
+                    "benchmark_command",
+                    "working_directory",
+                    "summary",
+                ],
             },
         ),
         types.Tool(
             name="save_final_report",
-            description="Self-Optimize Loop 완료 후 최종 보고서를 저장합니다.",
+            description="Run 종료 후 최종 보고서를 저장합니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "project_name": {
-                        "type": "string",
-                        "description": "프로젝트 이름",
+                    "run_id": {"type": "string"},
+                    "project_name": {"type": "string"},
+                    "total_iterations": {"type": "integer"},
+                    "initial_metric": {"type": "number"},
+                    "final_metric": {"type": "number"},
+                    "metric_key": {"type": "string"},
+                    "improvements_kept": {"type": "integer", "default": 0},
+                    "summary": {"type": "string"},
+                    "full_git_diff": {"type": "string", "default": ""},
+                    "start_commit": {"type": "string"},
+                    "final_commit": {"type": "string", "default": ""},
+                    "run_branch": {"type": "string", "default": ""},
+                    "benchmark_command": {"type": "string"},
+                    "working_directory": {"type": "string"},
+                    "failure_reasons": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "default": [],
                     },
-                    "total_iterations": {
-                        "type": "integer",
-                        "description": "총 iteration 횟수",
+                    "intent_contract": {
+                        "type": "object",
+                        "default": {},
                     },
-                    "initial_metric": {
-                        "type": "number",
-                        "description": "시작 메트릭 값",
-                    },
-                    "final_metric": {
-                        "type": "number",
-                        "description": "최종 메트릭 값",
-                    },
-                    "metric_key": {
-                        "type": "string",
-                        "description": "메트릭 키",
-                    },
-                    "improvements_kept": {
-                        "type": "integer",
-                        "description": "keep된 개선 횟수",
-                    },
-                    "full_git_diff": {
-                        "type": "string",
-                        "description": "전체 git diff (시작~종료)",
-                        "default": "",
-                    },
-                    "summary": {
-                        "type": "string",
-                        "description": "최종 요약",
+                    "aux_metrics": {
+                        "type": "object",
+                        "default": {},
                     },
                 },
-                "required": ["project_name", "total_iterations", "initial_metric", "final_metric", "metric_key", "summary"],
+                "required": [
+                    "run_id",
+                    "project_name",
+                    "total_iterations",
+                    "initial_metric",
+                    "final_metric",
+                    "metric_key",
+                    "summary",
+                    "start_commit",
+                    "benchmark_command",
+                    "working_directory",
+                ],
             },
         ),
     ]
@@ -130,142 +177,168 @@ async def list_tools() -> list[types.Tool]:
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     if name == "save_loop_log":
+        run_id = arguments["run_id"]
         project_name = arguments["project_name"]
         iteration = arguments["iteration"]
+        decision = arguments["decision"]
         metric_key = arguments["metric_key"]
         metric_value = arguments["metric_value"]
-        baseline = arguments.get("baseline_value", 0)
-        improvement = arguments["improvement"]
-        git_diff = arguments.get("git_diff", "")
+        baseline_value = arguments.get("baseline_value", 0)
+        improvement_percent = arguments.get("improvement_percent", 0)
+        start_commit = arguments["start_commit"]
+        candidate_commit = arguments.get("candidate_commit", "")
+        benchmark_command = arguments["benchmark_command"]
+        working_directory = arguments["working_directory"]
         summary = arguments["summary"]
+        failure_reason = arguments.get("failure_reason", "")
+        git_diff = arguments.get("git_diff", "")
         proposals = arguments.get("proposals", "")
+        intent_contract = arguments.get("intent_contract", {})
+        aux_metrics = arguments.get("aux_metrics", {})
 
-        today = datetime.date.today().isoformat()
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        filename = f"{today}-autoresearch-{project_name}.md"
+        filename = f"{_safe_run_id(run_id)}.md"
         filepath = os.path.join(_get_log_dir(), filename)
 
-        verdict = "✅ KEEP (ratchet forward)" if improvement else "❌ REVERT (no improvement)"
-
-        content = f"""
----
-
-## Iteration {iteration} — {now}
-
-| Key | Value |
-|-----|-------|
-| **Metric** | `{metric_key}` |
-| **Baseline** | `{baseline}` |
-| **Current** | `{metric_value}` |
-| **Verdict** | {verdict} |
-
-### Summary
-{summary}
-
-"""
-        if proposals:
-            content += f"""### Proposals Tried
-{proposals}
-
-"""
-        if git_diff:
-            content += f"""### Git Diff
-```diff
-{git_diff[:3000]}
-```
-
-"""
-        content += "*Generated by Goose M3 Autoresearch Loop (MLX Optimized)*\n"
-
-        # 파일이 없으면 헤더 추가
         if not os.path.exists(filepath):
-            header = f"""# 🔬 Autoresearch Loop — {project_name}
-**Date**: {today}
-**Metric**: `{metric_key}`
-**Engine**: Goose M3 Autoresearch (MLX Optimized)
+            header = (
+                f"# Angella Run Log — {project_name}\n\n"
+                f"- `run_id`: {run_id}\n"
+                f"- `start_commit`: {start_commit}\n"
+                f"- `working_directory`: {working_directory}\n"
+                f"- `benchmark_command`: `{benchmark_command}`\n"
+                f"- `log_root`: `{_resolve_vault_path()}`\n\n"
+                "## Intent Contract\n"
+                f"{_format_intent_contract(intent_contract)}\n"
+            )
+            with open(filepath, "w", encoding="utf-8") as handle:
+                handle.write(header)
 
-"""
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(header)
+        content = (
+            f"\n---\n\n"
+            f"## Iteration {iteration} — {now}\n\n"
+            f"| Key | Value |\n"
+            f"|-----|-------|\n"
+            f"| `decision` | {_decision_label(decision)} |\n"
+            f"| `metric_key` | `{metric_key}` |\n"
+            f"| `baseline_value` | `{baseline_value}` |\n"
+            f"| `metric_value` | `{metric_value}` |\n"
+            f"| `improvement_percent` | `{improvement_percent}` |\n"
+            f"| `start_commit` | `{start_commit}` |\n"
+            f"| `candidate_commit` | `{candidate_commit or '-'}` |\n"
+            f"| `failure_reason` | `{failure_reason or '-'}` |\n\n"
+            f"### Summary\n{summary}\n\n"
+        )
 
-        with open(filepath, "a", encoding="utf-8") as f:
-            f.write(content)
+        if proposals:
+            content += f"### Proposals\n{proposals}\n\n"
 
-        return [types.TextContent(
-            type="text",
-            text=json.dumps({
-                "status": "saved",
-                "filepath": os.path.abspath(filepath),
-                "iteration": iteration,
-                "verdict": verdict,
-            }, ensure_ascii=False)
-        )]
+        content += _format_json_block("Benchmark Aux Metrics", aux_metrics)
 
-    elif name == "save_final_report":
+        if git_diff:
+            content += f"### Git Diff\n```diff\n{git_diff[:4000]}\n```\n\n"
+
+        with open(filepath, "a", encoding="utf-8") as handle:
+            handle.write(content)
+
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps(
+                    {
+                        "status": "saved",
+                        "filepath": os.path.abspath(filepath),
+                        "run_id": run_id,
+                        "iteration": iteration,
+                        "decision": decision,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        ]
+
+    if name == "save_final_report":
+        run_id = arguments["run_id"]
         project_name = arguments["project_name"]
-        total = arguments["total_iterations"]
-        initial = arguments["initial_metric"]
-        final = arguments["final_metric"]
+        total_iterations = arguments["total_iterations"]
+        initial_metric = arguments["initial_metric"]
+        final_metric = arguments["final_metric"]
         metric_key = arguments["metric_key"]
-        kept = arguments.get("improvements_kept", 0)
-        git_diff = arguments.get("full_git_diff", "")
+        improvements_kept = arguments.get("improvements_kept", 0)
         summary = arguments["summary"]
+        full_git_diff = arguments.get("full_git_diff", "")
+        start_commit = arguments["start_commit"]
+        final_commit = arguments.get("final_commit", "")
+        run_branch = arguments.get("run_branch", "")
+        benchmark_command = arguments["benchmark_command"]
+        working_directory = arguments["working_directory"]
+        failure_reasons = arguments.get("failure_reasons", [])
+        intent_contract = arguments.get("intent_contract", {})
+        aux_metrics = arguments.get("aux_metrics", {})
 
         lower_is_better = metric_key in ("build_time", "latency_ms", "bundle_size")
-        if initial > 0:
+        if initial_metric > 0:
             if lower_is_better:
-                change_pct = round(((initial - final) / initial) * 100, 2)
+                change_pct = round(((initial_metric - final_metric) / initial_metric) * 100, 2)
             else:
-                change_pct = round(((final - initial) / initial) * 100, 2)
+                change_pct = round(((final_metric - initial_metric) / initial_metric) * 100, 2)
         else:
             change_pct = 0.0
 
-        today = datetime.date.today().isoformat()
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        filename = f"{today}-autoresearch-{project_name}-FINAL.md"
+        filename = f"{_safe_run_id(run_id)}-FINAL.md"
         filepath = os.path.join(_get_log_dir(), filename)
 
-        content = f"""# 🏁 Autoresearch Final Report — {project_name}
+        content = (
+            f"# Angella Final Report — {project_name}\n\n"
+            f"- `run_id`: {run_id}\n"
+            f"- `completed_at`: {now}\n"
+            f"- `run_branch`: {run_branch or '-'}\n"
+            f"- `start_commit`: {start_commit}\n"
+            f"- `final_commit`: {final_commit or '-'}\n"
+            f"- `working_directory`: {working_directory}\n"
+            f"- `benchmark_command`: `{benchmark_command}`\n\n"
+            "## Intent Contract\n"
+            f"{_format_intent_contract(intent_contract)}\n"
+            "## Result\n\n"
+            "| Metric | Initial | Final | Change |\n"
+            "|--------|---------|-------|--------|\n"
+            f"| `{metric_key}` | {initial_metric} | {final_metric} | {change_pct}% |\n\n"
+            f"- `total_iterations`: {total_iterations}\n"
+            f"- `improvements_kept`: {improvements_kept}\n\n"
+            f"## Summary\n{summary}\n\n"
+        )
 
-**Completed**: {now}
-**Total Iterations**: {total}
-**Improvements Kept**: {kept} / {total}
+        if failure_reasons:
+            content += "## Failure Reasons\n"
+            content += "\n".join(f"- {reason}" for reason in failure_reasons)
+            content += "\n\n"
 
-## Results
+        content += _format_json_block("Aux Metrics", aux_metrics)
 
-| Metric | Initial | Final | Change |
-|--------|---------|-------|--------|
-| `{metric_key}` | {initial} | {final} | **{'+' if change_pct > 0 else ''}{change_pct}%** |
+        if full_git_diff:
+            content += f"## Full Git Diff\n```diff\n{full_git_diff[:6000]}\n```\n"
 
-## Summary
-{summary}
+        with open(filepath, "w", encoding="utf-8") as handle:
+            handle.write(content)
 
-"""
-        if git_diff:
-            content += f"""## Full Git Diff (Start → End)
-```diff
-{git_diff[:5000]}
-```
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps(
+                    {
+                        "status": "final_report_saved",
+                        "filepath": os.path.abspath(filepath),
+                        "run_id": run_id,
+                        "total_iterations": total_iterations,
+                        "improvement_percent": change_pct,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        ]
 
-"""
-        content += """---
-*Generated by Goose M3 Autoresearch Loop (MLX Optimized)*
-"""
-
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        return [types.TextContent(
-            type="text",
-            text=json.dumps({
-                "status": "final_report_saved",
-                "filepath": os.path.abspath(filepath),
-                "total_iterations": total,
-                "improvement_percent": change_pct,
-            }, ensure_ascii=False)
-        )]
-
-    return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
+    return [types.TextContent(type="text", text=json.dumps({"success": False, "error": f"Unknown tool: {name}"}))]
 
 
 async def main():
@@ -275,4 +348,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

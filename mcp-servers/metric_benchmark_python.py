@@ -1,35 +1,33 @@
 #!/usr/bin/env python3
-"""
-Python Metric Benchmark MCP Server
-====================================
-Python inference 속도 (tokens/s, latency) 측정.
-MLX 기반 inference 스크립트에 최적화.
-"""
+"""Python benchmark adapter with the shared benchmark schema."""
 
+import os
+import re
 import subprocess
 import time
-import re
-import json
-import os
 
+from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp import types
+
+from common import (
+    SUPPORTED_METRICS,
+    build_benchmark_payload,
+    compare_metrics_payload,
+    text_response,
+)
 
 server = Server("metric-benchmark-python")
 
 
 def _parse_python_metrics(stdout: str, stderr: str) -> dict:
-    """Python inference 로그에서 성능 메트릭 추출"""
     combined = stdout + stderr
     metrics = {
         "tokens_per_second": 0.0,
         "latency_ms": 0.0,
-        "throughput": 0.0,
         "memory_mb": 0.0,
     }
 
-    # tokens/s 패턴들
     tps_patterns = [
         r"tokens?[/_\s](?:per[_\s])?s(?:ec)?[:\s]+([0-9]+\.?[0-9]*)",
         r"([0-9]+\.?[0-9]*)\s*(?:tok(?:en)?s?/s)",
@@ -42,13 +40,19 @@ def _parse_python_metrics(stdout: str, stderr: str) -> dict:
             metrics["tokens_per_second"] = float(match.group(1))
             break
 
-    # Latency
-    lat_match = re.search(r"(?:latency|time|elapsed)[:\s]+([0-9]+\.?[0-9]*)\s*(?:ms|millisec)", combined, re.IGNORECASE)
+    lat_match = re.search(
+        r"(?:latency|time|elapsed)[:\s]+([0-9]+\.?[0-9]*)\s*(?:ms|millisec)",
+        combined,
+        re.IGNORECASE,
+    )
     if lat_match:
         metrics["latency_ms"] = float(lat_match.group(1))
 
-    # Memory
-    mem_match = re.search(r"(?:memory|mem|rss)[:\s]+([0-9]+\.?[0-9]*)\s*(?:MB|mb)", combined, re.IGNORECASE)
+    mem_match = re.search(
+        r"(?:memory|mem|rss)[:\s]+([0-9]+\.?[0-9]*)\s*(?:MB|mb)",
+        combined,
+        re.IGNORECASE,
+    )
     if mem_match:
         metrics["memory_mb"] = float(mem_match.group(1))
 
@@ -59,14 +63,19 @@ def _parse_python_metrics(stdout: str, stderr: str) -> dict:
 async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
-            name="benchmark_python",
-            description="Python 스크립트의 inference 속도 (tokens/s), latency, 메모리를 측정합니다.",
+            name="run_benchmark",
+            description="Python 스크립트를 측정하고 공통 benchmark payload를 반환합니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "실행할 Python 명령어 (예: 'python inference.py --model qwen2.5')",
+                        "description": "실행할 Python 명령어",
+                    },
+                    "metric_key": {
+                        "type": "string",
+                        "enum": ["tokens_per_second", "latency_ms"],
+                        "default": "tokens_per_second",
                     },
                     "working_directory": {
                         "type": "string",
@@ -75,7 +84,7 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "runs": {
                         "type": "integer",
-                        "description": "반복 실행 횟수 (평균값 계산)",
+                        "description": "반복 실행 횟수",
                         "default": 1,
                     },
                     "timeout_seconds": {
@@ -87,21 +96,79 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["command"],
             },
         ),
+        types.Tool(
+            name="compare_metrics",
+            description="두 메트릭 값을 비교하여 개선 여부를 판정합니다.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "baseline": {"type": "number"},
+                    "current": {"type": "number"},
+                    "metric_key": {
+                        "type": "string",
+                        "enum": list(SUPPORTED_METRICS),
+                    },
+                    "threshold_percent": {
+                        "type": "number",
+                        "default": 1.0,
+                    },
+                },
+                "required": ["baseline", "current", "metric_key"],
+            },
+        ),
     ]
 
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    if name == "benchmark_python":
-        command = arguments["command"]
-        cwd = os.path.expanduser(arguments.get("working_directory", "."))
-        runs = arguments.get("runs", 1)
-        timeout = arguments.get("timeout_seconds", 120)
+    if name in {"run_benchmark", "benchmark_python"}:
+        if name == "benchmark_python":
+            command = arguments["command"]
+            metric_key = arguments.get("metric_key", "tokens_per_second")
+            cwd = os.path.expanduser(arguments.get("working_directory", "."))
+            runs = int(arguments.get("runs", 1))
+            timeout = int(arguments.get("timeout_seconds", 120))
+        else:
+            command = arguments["command"]
+            metric_key = arguments.get("metric_key", "tokens_per_second")
+            cwd = os.path.expanduser(arguments.get("working_directory", "."))
+            runs = int(arguments.get("runs", 1))
+            timeout = int(arguments.get("timeout_seconds", 120))
+
+        if metric_key not in {"tokens_per_second", "latency_ms"}:
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=0.0,
+                    exit_code=2,
+                    aux_metrics={"failure_reason": "unsupported_metric_for_python"},
+                )
+            )
+
+        if not os.path.isdir(cwd):
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=0.0,
+                    exit_code=2,
+                    aux_metrics={
+                        "failure_reason": "working_directory_not_found",
+                        "working_directory": cwd,
+                    },
+                )
+            )
 
         all_metrics = []
         all_durations = []
+        last_stdout = ""
+        last_stderr = ""
+        last_exit_code = 0
 
-        for i in range(runs):
+        for run_index in range(runs):
             try:
                 start = time.time()
                 result = subprocess.run(
@@ -115,45 +182,93 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 )
                 duration = time.time() - start
                 all_durations.append(duration)
+                last_stdout = result.stdout
+                last_stderr = result.stderr
+                last_exit_code = result.returncode
 
                 if result.returncode != 0:
-                    return [types.TextContent(
-                        type="text",
-                        text=json.dumps({
-                            "error": f"Run {i+1} failed (exit code {result.returncode})",
-                            "stderr": result.stderr[-500:],
-                            "success": False,
-                        })
-                    )]
+                    return text_response(
+                        build_benchmark_payload(
+                            success=False,
+                            metric_key=metric_key,
+                            metric_value=0.0,
+                            duration_seconds=duration,
+                            exit_code=result.returncode,
+                            stdout=result.stdout,
+                            stderr=result.stderr,
+                            aux_metrics={
+                                "failure_reason": "command_failed",
+                                "command": command,
+                                "working_directory": cwd,
+                                "failed_run_index": run_index + 1,
+                            },
+                        )
+                    )
 
-                metrics = _parse_python_metrics(result.stdout, result.stderr)
-                all_metrics.append(metrics)
-
+                all_metrics.append(_parse_python_metrics(result.stdout, result.stderr))
             except subprocess.TimeoutExpired:
-                return [types.TextContent(
-                    type="text",
-                    text=json.dumps({"error": f"Timeout on run {i+1} ({timeout}s)", "success": False})
-                )]
+                return text_response(
+                    build_benchmark_payload(
+                        success=False,
+                        metric_key=metric_key,
+                        metric_value=0.0,
+                        duration_seconds=float(timeout),
+                        exit_code=124,
+                        aux_metrics={
+                            "failure_reason": "timeout",
+                            "command": command,
+                            "working_directory": cwd,
+                            "failed_run_index": run_index + 1,
+                        },
+                    )
+                )
 
-        # 평균 계산
-        avg_tps = sum(m["tokens_per_second"] for m in all_metrics) / len(all_metrics) if all_metrics else 0
-        avg_lat = sum(m["latency_ms"] for m in all_metrics) / len(all_metrics) if all_metrics else 0
-        avg_dur = sum(all_durations) / len(all_durations) if all_durations else 0
+        avg_duration = sum(all_durations) / len(all_durations) if all_durations else 0.0
+        avg_tokens = (
+            sum(item["tokens_per_second"] for item in all_metrics) / len(all_metrics)
+            if all_metrics
+            else 0.0
+        )
+        avg_latency = (
+            sum(item["latency_ms"] for item in all_metrics) / len(all_metrics)
+            if all_metrics
+            else 0.0
+        )
+        metric_value = avg_tokens if metric_key == "tokens_per_second" else avg_latency
+        metric_found = metric_value > 0
 
-        output = {
-            "metric_key": "tokens_per_second",
-            "metric_value": round(avg_tps, 2),
-            "tokens_per_second": round(avg_tps, 2),
-            "latency_ms": round(avg_lat, 2),
-            "avg_duration_seconds": round(avg_dur, 3),
-            "memory_mb": all_metrics[-1]["memory_mb"] if all_metrics else 0,
-            "runs_completed": len(all_metrics),
-            "success": True,
-        }
+        return text_response(
+            build_benchmark_payload(
+                success=metric_found,
+                metric_key=metric_key,
+                metric_value=metric_value,
+                duration_seconds=avg_duration,
+                exit_code=last_exit_code,
+                stdout=last_stdout,
+                stderr=last_stderr,
+                aux_metrics={
+                    "command": command,
+                    "working_directory": cwd,
+                    "runs_completed": len(all_metrics),
+                    "tokens_per_second": round(avg_tokens, 4),
+                    "latency_ms": round(avg_latency, 4),
+                    "memory_mb": all_metrics[-1]["memory_mb"] if all_metrics else 0.0,
+                    "failure_reason": "" if metric_found else "metric_parse_failed",
+                },
+            )
+        )
 
-        return [types.TextContent(type="text", text=json.dumps(output, indent=2, ensure_ascii=False))]
+    if name == "compare_metrics":
+        return text_response(
+            compare_metrics_payload(
+                float(arguments["baseline"]),
+                float(arguments["current"]),
+                arguments["metric_key"],
+                float(arguments.get("threshold_percent", 1.0)),
+            )
+        )
 
-    return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
+    return text_response({"success": False, "error": f"Unknown tool: {name}"})
 
 
 async def main():
@@ -163,4 +278,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

@@ -1,31 +1,26 @@
 #!/usr/bin/env python3
-"""
-Generic Metric Benchmark MCP Server
-====================================
-MLX 최적화된 범용 벤치마크 실행 + objective metric 추출.
-Goose의 Autoresearch ratchet loop에서 호출됩니다.
+"""Generic benchmark MCP with a shared benchmark payload schema."""
 
-Usage (stdio MCP):
-  python metric_benchmark.py
-"""
-
+import os
+import re
 import subprocess
 import time
-import re
-import json
-import os
-import sys
-from typing import Optional
 
+from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp import types
+
+from common import (
+    SUPPORTED_METRICS,
+    build_benchmark_payload,
+    compare_metrics_payload,
+    text_response,
+)
 
 server = Server("metric-benchmark")
 
 
-def _parse_metric(stdout: str, metric_key: str) -> float:
-    """stdout에서 metric_key에 해당하는 숫자 값 추출"""
+def _parse_metric(output: str, metric_key: str) -> tuple[float, bool, str]:
     patterns = {
         "tokens_per_second": [
             r"tokens?[/_\s](?:per[_\s])?s(?:ec(?:ond)?)?[:\s]+([0-9]+\.?[0-9]*)",
@@ -46,16 +41,11 @@ def _parse_metric(stdout: str, metric_key: str) -> float:
     }
 
     for pattern in patterns.get(metric_key, []):
-        match = re.search(pattern, stdout, re.IGNORECASE)
+        match = re.search(pattern, output, re.IGNORECASE)
         if match:
-            return float(match.group(1))
+            return float(match.group(1)), True, "parsed_from_output"
 
-    # Fallback: 마지막으로 나타나는 숫자
-    numbers = re.findall(r"([0-9]+\.?[0-9]+)", stdout)
-    if numbers:
-        return float(numbers[-1])
-
-    return 0.0
+    return 0.0, False, "parse_failed"
 
 
 @server.list_tools()
@@ -63,7 +53,7 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="run_benchmark",
-            description="벤치마크 명령을 실행하고 objective metric을 추출합니다. MLX 최적화 환경에서 동작합니다.",
+            description="벤치마크 명령을 실행하고 공통 benchmark payload를 반환합니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -74,12 +64,7 @@ async def list_tools() -> list[types.Tool]:
                     "metric_key": {
                         "type": "string",
                         "description": "추출할 메트릭 키",
-                        "enum": [
-                            "tokens_per_second",
-                            "build_time",
-                            "latency_ms",
-                            "bundle_size",
-                        ],
+                        "enum": list(SUPPORTED_METRICS),
                         "default": "build_time",
                     },
                     "working_directory": {
@@ -113,12 +98,7 @@ async def list_tools() -> list[types.Tool]:
                     "metric_key": {
                         "type": "string",
                         "description": "메트릭 키 (lower_is_better 판단용)",
-                        "enum": [
-                            "tokens_per_second",
-                            "build_time",
-                            "latency_ms",
-                            "bundle_size",
-                        ],
+                        "enum": list(SUPPORTED_METRICS),
                     },
                     "threshold_percent": {
                         "type": "number",
@@ -135,10 +115,38 @@ async def list_tools() -> list[types.Tool]:
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     if name == "run_benchmark":
-        command = arguments["command"]
+        command = arguments["command"].strip()
         metric_key = arguments.get("metric_key", "build_time")
         cwd = arguments.get("working_directory", ".")
         timeout = arguments.get("timeout_seconds", 300)
+
+        if not command:
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=0.0,
+                    exit_code=2,
+                    aux_metrics={"failure_reason": "empty_command"},
+                )
+            )
+
+        expanded_cwd = os.path.expanduser(cwd)
+        if not os.path.isdir(expanded_cwd):
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=0.0,
+                    exit_code=2,
+                    aux_metrics={
+                        "failure_reason": "working_directory_not_found",
+                        "working_directory": expanded_cwd,
+                    },
+                )
+            )
 
         try:
             start = time.time()
@@ -147,82 +155,89 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 shell=True,
                 capture_output=True,
                 text=True,
-                cwd=os.path.expanduser(cwd),
+                cwd=expanded_cwd,
                 timeout=timeout,
                 env={**os.environ},
             )
             duration = time.time() - start
 
-            metric_value = _parse_metric(
+            metric_value, metric_found, metric_source = _parse_metric(
                 result.stdout + result.stderr, metric_key
             )
 
-            # build_time의 경우 duration을 기본값으로 사용
-            if metric_key == "build_time" and metric_value == 0.0:
-                metric_value = round(duration, 3)
+            if metric_key == "build_time" and not metric_found:
+                metric_value = duration
+                metric_found = True
+                metric_source = "duration_fallback"
 
-            output = {
-                "metric_key": metric_key,
-                "metric_value": metric_value,
-                "duration_seconds": round(duration, 3),
-                "success": result.returncode == 0,
-                "exit_code": result.returncode,
-                "stdout_tail": result.stdout[-1500:] if result.stdout else "",
-                "stderr_tail": result.stderr[-500:] if result.stderr else "",
-            }
+            success = result.returncode == 0 and metric_found
+            failure_reason = ""
+            if result.returncode != 0:
+                failure_reason = "command_failed"
+            elif not metric_found:
+                failure_reason = "metric_parse_failed"
 
-            return [types.TextContent(type="text", text=json.dumps(output, indent=2, ensure_ascii=False))]
+            return text_response(
+                build_benchmark_payload(
+                    success=success,
+                    metric_key=metric_key,
+                    metric_value=metric_value,
+                    duration_seconds=duration,
+                    exit_code=result.returncode,
+                    stdout=result.stdout,
+                    stderr=result.stderr,
+                    aux_metrics={
+                        "command": command,
+                        "working_directory": expanded_cwd,
+                        "metric_found": metric_found,
+                        "metric_source": metric_source,
+                        "failure_reason": failure_reason,
+                    },
+                )
+            )
 
         except subprocess.TimeoutExpired:
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps(
-                        {"error": f"Timeout after {timeout}s", "success": False}
-                    ),
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=float(timeout),
+                    exit_code=124,
+                    aux_metrics={
+                        "failure_reason": "timeout",
+                        "command": command,
+                        "working_directory": expanded_cwd,
+                    },
                 )
-            ]
+            )
         except Exception as e:
-            return [
-                types.TextContent(
-                    type="text",
-                    text=json.dumps({"error": str(e), "success": False}),
+            return text_response(
+                build_benchmark_payload(
+                    success=False,
+                    metric_key=metric_key,
+                    metric_value=0.0,
+                    duration_seconds=0.0,
+                    exit_code=1,
+                    aux_metrics={
+                        "failure_reason": "exception",
+                        "error": str(e),
+                        "command": command,
+                        "working_directory": expanded_cwd,
+                    },
                 )
-            ]
+            )
 
     elif name == "compare_metrics":
-        baseline = arguments["baseline"]
-        current = arguments["current"]
+        baseline = float(arguments["baseline"])
+        current = float(arguments["current"])
         metric_key = arguments["metric_key"]
-        threshold = arguments.get("threshold_percent", 1.0)
+        threshold = float(arguments.get("threshold_percent", 1.0))
+        return text_response(
+            compare_metrics_payload(baseline, current, metric_key, threshold)
+        )
 
-        # lower_is_better: build_time, latency_ms, bundle_size
-        # higher_is_better: tokens_per_second
-        lower_is_better = metric_key in ("build_time", "latency_ms", "bundle_size")
-
-        if baseline == 0:
-            improvement_pct = 100.0 if current != 0 else 0.0
-        else:
-            if lower_is_better:
-                improvement_pct = ((baseline - current) / baseline) * 100
-            else:
-                improvement_pct = ((current - baseline) / baseline) * 100
-
-        is_improved = improvement_pct >= threshold
-
-        output = {
-            "metric_key": metric_key,
-            "baseline": baseline,
-            "current": current,
-            "improvement_percent": round(improvement_pct, 2),
-            "is_improved": is_improved,
-            "verdict": "✅ KEEP (ratchet forward)" if is_improved else "❌ REVERT (no improvement)",
-            "direction": "lower_is_better" if lower_is_better else "higher_is_better",
-        }
-
-        return [types.TextContent(type="text", text=json.dumps(output, indent=2, ensure_ascii=False))]
-
-    return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
+    return text_response({"success": False, "error": f"Unknown tool: {name}"})
 
 
 async def main():
