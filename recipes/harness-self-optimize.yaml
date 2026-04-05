@@ -85,6 +85,7 @@ instructions: |
   6. benchmark로 판정합니다.
   7. 개선이면 keep, 아니면 revert합니다.
      - verification-only 실행으로 끝났거나 code/config patch가 없으면 finalize tool을 호출하지 않습니다.
+     - 이 경우 `control-plane-admin.record_verification_only_run` 으로 benchmark 결과와 summary만 기록하고 종료합니다.
   8. 성공한 경우 `control-plane-admin.finalize_accepted_meta_loop_run` 을 호출합니다.
      - 이 tool은 `.cache/angella/control-plane/knowledge/` 아래 draft를 만들고,
        promotion rule이 만족되면 tracked `knowledge/sops/` 또는 `knowledge/skills/` 로 승격합니다.

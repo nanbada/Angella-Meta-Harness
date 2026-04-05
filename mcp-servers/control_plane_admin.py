@@ -15,6 +15,7 @@ from meta_loop_ops import (
     harness_component_context,
     inspect_control_plane,
     prune_stale_control_plane_artifacts,
+    record_verification_only_run,
     promote_knowledge_drafts,
 )
 
@@ -126,6 +127,32 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["objective_component"],
             },
         ),
+        types.Tool(
+            name="record_verification_only_run",
+            description="verification-only benchmark 결과를 control-plane summary/telemetry에 기록하고 종료합니다.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string"},
+                    "objective_component": {"type": "string"},
+                    "benchmark_command": {"type": "string"},
+                    "metric_key": {"type": "string"},
+                    "metric_value": {"type": "number"},
+                    "summary": {"type": "string"},
+                    "working_directory": {"type": "string"},
+                    "branch_name": {"type": "string", "default": ""},
+                },
+                "required": [
+                    "run_id",
+                    "objective_component",
+                    "benchmark_command",
+                    "metric_key",
+                    "metric_value",
+                    "summary",
+                    "working_directory",
+                ],
+            },
+        ),
     ]
 
 
@@ -202,6 +229,20 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
     if name == "describe_harness_component":
         return text_response(harness_component_context(arguments["objective_component"]))
+
+    if name == "record_verification_only_run":
+        return text_response(
+            record_verification_only_run(
+                run_id=arguments["run_id"],
+                objective_component=arguments["objective_component"],
+                benchmark_command=arguments["benchmark_command"],
+                metric_key=arguments["metric_key"],
+                metric_value=arguments["metric_value"],
+                summary=arguments["summary"],
+                working_directory=arguments["working_directory"],
+                branch_name=arguments.get("branch_name", ""),
+            )
+        )
 
     return text_response({"success": False, "error": f"Unknown tool: {name}"})
 

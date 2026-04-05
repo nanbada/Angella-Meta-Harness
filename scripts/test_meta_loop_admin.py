@@ -21,6 +21,7 @@ from meta_loop_ops import (
     finalize_accepted_meta_loop_run,
     generate_knowledge_drafts_from_run,
     promote_knowledge_drafts,
+    record_verification_only_run,
     prune_stale_control_plane_artifacts,
 )  # noqa: E402
 
@@ -28,6 +29,10 @@ from meta_loop_ops import (
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _read_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _run(args: list[str], *, cwd: Path, env: dict[str, str] | None = None) -> str:
@@ -356,6 +361,22 @@ def main() -> int:
         assert inspection["open_failures"]
         assert inspection["recent_queue"]
         assert inspection["retention_policy_days"]["drafts"] == 14
+
+        verification_only = record_verification_only_run(
+            run_id="verification-only-run",
+            objective_component="recipe-runtime",
+            benchmark_command="python3 scripts/test_harness_self_optimize_adapter.py",
+            metric_key="build_time",
+            metric_value=0.42,
+            summary="Verification-only benchmark passed without a code patch.",
+            working_directory=str(repo),
+            branch_name="angella/run-verification-only",
+        )
+        verification_summary = Path(verification_only["summary_path"])
+        assert verification_summary.is_file()
+        verification_payload = _read_json(verification_summary)
+        assert verification_payload["verification_only"] is True
+        assert verification_payload["metric_value"] == 0.42
 
     print("meta loop admin tests passed")
     return 0

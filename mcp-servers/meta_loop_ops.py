@@ -980,6 +980,66 @@ def inspect_control_plane(
     }
 
 
+def record_verification_only_run(
+    *,
+    run_id: str,
+    objective_component: str,
+    benchmark_command: str,
+    metric_key: str,
+    metric_value: float,
+    summary: str,
+    working_directory: str,
+    branch_name: str = "",
+) -> dict[str, Any]:
+    run_path = run_dir(run_id)
+    payload = {
+        "run_id": run_id,
+        "verification_only": True,
+        "objective_component": objective_component,
+        "benchmark_command": benchmark_command,
+        "metric_key": metric_key,
+        "metric_value": metric_value,
+        "summary": summary,
+        "working_directory": working_directory,
+        "branch_name": branch_name,
+        "recorded_at": _now_timestamp(),
+    }
+    summary_path = run_path / "summary.json"
+    if summary_path.exists():
+        existing = _json_load(summary_path)
+        existing["verification_only"] = True
+        existing["summary"] = summary
+        existing["benchmark_command"] = benchmark_command
+        existing["metric_key"] = metric_key
+        existing["final_metric"] = metric_value
+        existing["working_directory"] = working_directory
+        existing["run_branch"] = branch_name or existing.get("run_branch", "")
+        existing["verification_recorded_at"] = payload["recorded_at"]
+        _json_dump(summary_path, existing)
+        payload["summary_path"] = str(summary_path)
+        payload["summary_payload"] = existing
+    else:
+        payload["summary_path"] = str(summary_path)
+        _json_dump(summary_path, payload)
+        payload["summary_payload"] = payload.copy()
+
+    append_jsonl(
+        run_path / "telemetry.jsonl",
+        {
+            "event_type": "verification_only",
+            "timestamp": payload["recorded_at"],
+            "run_id": run_id,
+            "objective_component": objective_component,
+            "benchmark_command": benchmark_command,
+            "metric_key": metric_key,
+            "metric_value": metric_value,
+            "summary": summary,
+            "branch_name": branch_name,
+        },
+    )
+    return payload
+
+
 def prune_stale_control_plane_artifacts(
     *,
     max_age_days: int = 0,
