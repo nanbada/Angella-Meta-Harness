@@ -664,7 +664,11 @@ install_templates() {
 
     if [ -f "$RENDERED_CONFIG_PATH" ]; then
         warn "Goose config already exists at $RENDERED_CONFIG_PATH"
-        if prompt_yes_no "Overwrite with Angella config?" "no"; then
+        if [ "$AUTO_YES" = true ]; then
+            info "AUTO_YES=true -> overwriting existing Goose config to avoid stale install drift"
+            render_and_verify "$SCRIPT_DIR/config/goose-config.yaml" "$RENDERED_CONFIG_PATH"
+            ok "Goose config updated"
+        elif prompt_yes_no "Overwrite with Angella config?" "no"; then
             render_and_verify "$SCRIPT_DIR/config/goose-config.yaml" "$RENDERED_CONFIG_PATH"
             ok "Goose config updated"
         else

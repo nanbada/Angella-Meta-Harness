@@ -149,6 +149,28 @@ test -f "$INSTALL_HOME/.config/goose/config.yaml"
 test -f "$INSTALL_HOME/.config/goose/recipes/autoresearch-loop.yaml"
 grep -q "Setup Complete" "$INSTALL_OUT"
 
+AUTO_YES_HOME="$TMP_ROOT/home-auto-yes-overwrite"
+mkdir -p "$AUTO_YES_HOME/.config/goose/recipes"
+cat >"$AUTO_YES_HOME/.config/goose/config.yaml" <<'EOF'
+GOOSE_PROVIDER: "ollama"
+GOOSE_MODEL: "stale-model"
+EOF
+
+AUTO_YES_OUT="$TMP_ROOT/auto-yes-overwrite.out"
+AUTO_YES_ERR="$TMP_ROOT/auto-yes-overwrite.err"
+(
+  cd "$ROOT_DIR"
+  HOME="$AUTO_YES_HOME" bash setup.sh \
+    --install-only \
+    --yes \
+    --lead-model openai_gpt_5_2_pro \
+    --planner-model openai_gpt_5_2_pro \
+    --worker-model ollama_gemma4_26b >"$AUTO_YES_OUT" 2>"$AUTO_YES_ERR"
+)
+
+grep -q 'GOOSE_MODEL: "gemma4:26b"' "$AUTO_YES_HOME/.config/goose/config.yaml"
+grep -q 'GOOSE_LEAD_PROVIDER: "openai"' "$AUTO_YES_HOME/.config/goose/config.yaml"
+
 YES_OUT="$TMP_ROOT/yes.out"
 YES_ERR="$TMP_ROOT/yes.err"
 
