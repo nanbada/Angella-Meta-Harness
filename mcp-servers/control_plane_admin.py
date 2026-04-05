@@ -25,7 +25,7 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="draft_knowledge_from_run",
-            description="Accepted run summary를 기반으로 control-plane knowledge draft를 생성합니다.",
+            description="Accepted run summary를 기반으로 control-plane knowledge draft를 생성합니다. dry_run이면 preview만 반환합니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -39,7 +39,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="promote_knowledge_drafts",
-            description="Control-plane draft를 promotion rule에 따라 tracked knowledge/sops 또는 knowledge/skills 로 승격합니다.",
+            description="Control-plane draft를 promotion rule에 따라 tracked knowledge/sops 또는 knowledge/skills 로 승격합니다. dry_run이면 preview만 반환합니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -52,7 +52,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="export_meta_loop_change",
-            description="Accepted meta-loop change를 codex 브랜치로 내보내고 draft PR을 생성합니다.",
+            description="Accepted meta-loop change를 codex 브랜치로 내보내고 draft PR을 생성합니다. dry_run이면 branch/PR을 만들지 않습니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -70,7 +70,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="finalize_accepted_meta_loop_run",
-            description="Accepted run의 draft 생성, promotion, codex 브랜치 export, draft PR 생성을 한 번에 수행합니다.",
+            description="Accepted run의 draft 생성, promotion, codex 브랜치 export, draft PR 생성을 한 번에 수행합니다. dry_run이면 preview만 반환합니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -89,11 +89,11 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="prune_stale_control_plane_artifacts",
-            description="오래된 control-plane draft 및 meta-loop queue artifact를 정리합니다.",
+            description="오래된 control-plane draft 및 meta-loop queue artifact를 정리합니다. max_age_days=0이면 내장 retention policy를 사용합니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "max_age_days": {"type": "integer", "default": 7},
+                    "max_age_days": {"type": "integer", "default": 0},
                     "include_drafts": {"type": "boolean", "default": True},
                     "include_queue": {"type": "boolean", "default": True},
                     "dry_run": {"type": "boolean", "default": False},

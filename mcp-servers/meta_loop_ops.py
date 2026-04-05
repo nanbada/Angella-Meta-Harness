@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import json
 import os
 import re
 import subprocess
 import time
 from pathlib import Path
+from string import Template
 from typing import Any
 
 from control_plane import append_jsonl, ensure_control_plane_layout, run_dir, safe_run_id
@@ -17,6 +19,20 @@ from control_plane import append_jsonl, ensure_control_plane_layout, run_dir, sa
 
 ANGELLA_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_LOG_ROOT = ANGELLA_ROOT / "logs" / "Goose Logs"
+META_LOOP_PR_TEMPLATE_PATH = ANGELLA_ROOT / "templates" / "meta-loop-pr.md.tmpl"
+BRANCH_PREFIX = "codex/meta-loop"
+MAX_BRANCH_LENGTH = 96
+BRANCH_OBJECTIVE_SLUG_MAX = 20
+BRANCH_RUN_SLUG_MAX = 28
+DEFAULT_DRAFT_RETENTION_DAYS = 14
+QUEUE_RETENTION_POLICY_DAYS = {
+    "draft_pr": 14,
+    "promotion_report": 21,
+    "export": 30,
+    "finalize": 30,
+    "prune_report": 7,
+    "default": 21,
+}
 
 
 def _now_timestamp() -> str:
@@ -35,6 +51,48 @@ def _json_load(path: Path) -> dict[str, Any]:
 def _slug(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
     return slug or "item"
+
+
+def _stable_suffix(*parts: str, length: int = 8) -> str:
+    digest = hashlib.sha1("::".join(parts).encode("utf-8")).hexdigest()
+    return digest[:length]
+
+
+def _bounded_slug(value: str, max_len: int) -> str:
+    slug = _slug(value)
+    if len(slug) <= max_len:
+        return slug
+    suffix = _stable_suffix(slug, length=6)
+    head = slug[: max(1, max_len - 7)].rstrip("-")
+    return f"{head}-{suffix}"
+
+
+def _default_meta_loop_branch_name(objective_component: str, run_id: str) -> str:
+    objective_slug = _bounded_slug(objective_component or "harness", BRANCH_OBJECTIVE_SLUG_MAX)
+    run_slug = _bounded_slug(safe_run_id(run_id), BRANCH_RUN_SLUG_MAX)
+    suffix = _stable_suffix(objective_component or "harness", run_id, length=8)
+    branch = f"{BRANCH_PREFIX}-{objective_slug}-{run_slug}-{suffix}"
+    return branch[:MAX_BRANCH_LENGTH].rstrip("-")
+
+
+def _normalize_requested_branch_name(branch_name: str, run_id: str) -> str:
+    requested = branch_name.strip()
+    if not requested:
+        return ""
+    if requested.startswith("codex/"):
+        requested = requested[len("codex/") :]
+    normalized = _bounded_slug(requested.replace("/", "-"), MAX_BRANCH_LENGTH - len("codex/") - 9)
+    suffix = _stable_suffix(requested, run_id, length=8)
+    return f"codex/{normalized}-{suffix}"[:MAX_BRANCH_LENGTH].rstrip("-")
+
+
+def _content_fingerprint(content: str) -> str:
+    normalized = "\n".join(line.rstrip() for line in content.strip().splitlines())
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
+
+
+def _draft_fingerprint_marker(fingerprint: str) -> str:
+    return f"<!-- angella-draft-fingerprint:{fingerprint} -->"
 
 
 def _repo_root(repo_root: str | Path | None = None) -> Path:
@@ -147,23 +205,77 @@ def _strip_h1(content: str) -> str:
     return "\n".join(lines).strip()
 
 
+def _is_list_line(line: str) -> bool:
+    stripped = line.lstrip()
+    return stripped.startswith(("- ", "* ")) or bool(re.match(r"[0-9]+\.\s", stripped))
+
+
+def _normalized_line(line: str) -> str:
+    return re.sub(r"\s+", " ", line.strip())
+
+
+def _dedupe_addendum_body(target_content: str, draft_body: str) -> str:
+    existing_lines = {
+        _normalized_line(line)
+        for line in target_content.splitlines()
+        if _is_list_line(line) and _normalized_line(line)
+    }
+    seen_new: set[str] = set()
+    output: list[str] = []
+    for line in draft_body.splitlines():
+        normalized = _normalized_line(line)
+        if not normalized:
+            output.append(line)
+            continue
+        if _is_list_line(line):
+            if normalized in existing_lines or normalized in seen_new:
+                continue
+            seen_new.add(normalized)
+        elif normalized in seen_new:
+            continue
+        output.append(line)
+    return "\n".join(output).strip()
+
+
+def _queue_artifact_kind(path: Path) -> str:
+    name = path.name
+    if name.endswith("-draft-pr.md"):
+        return "draft_pr"
+    if name.endswith("-promotion-report.json"):
+        return "promotion_report"
+    if name.endswith("-export.json"):
+        return "export"
+    if name.endswith("-finalize.json"):
+        return "finalize"
+    if name.endswith("-prune-report.json"):
+        return "prune_report"
+    return "default"
+
+
 def _merge_existing_target_content(
     *,
     target_content: str,
     draft_content: str,
     source_run_id: str,
+    fingerprint: str,
 ) -> tuple[str, str]:
     marker = _draft_addendum_marker(source_run_id)
-    if marker in target_content:
+    fingerprint_marker = _draft_fingerprint_marker(fingerprint)
+    if marker in target_content or fingerprint_marker in target_content:
         return target_content, "already_merged"
 
     draft_body = _strip_h1(draft_content)
     if not draft_body:
         draft_body = draft_content.strip()
+    draft_body = _dedupe_addendum_body(target_content, draft_body)
+    if not draft_body:
+        return target_content, "already_merged"
 
     merged = (
         target_content.rstrip()
         + "\n\n---\n\n"
+        + fingerprint_marker
+        + "\n"
         + marker
         + "\n\n"
         + draft_body
@@ -252,6 +364,9 @@ def _write_draft(
         "draft_kind": kind,
         "draft_id": metadata["draft_id"],
         "target_relpath": metadata["target_relpath"],
+        "body_preview": body,
+        "metadata_preview": metadata,
+        "dry_run": dry_run,
     }
 
 
@@ -299,6 +414,16 @@ def generate_knowledge_drafts_from_run(
             "operator_confirmed": operator_confirmed,
             "allow_overwrite_existing": False,
             "merge_strategy": "append_run_addendum",
+            "content_fingerprint": _content_fingerprint(
+                "\n".join(
+                    [
+                        failure_type,
+                        objective,
+                        str(summary.get("metric_key", "")),
+                        str(summary.get("summary", "")),
+                    ]
+                )
+            ),
             "failure_types": [failure_type],
             "promotion_rules": {
                 "any_of": [
@@ -343,6 +468,16 @@ def generate_knowledge_drafts_from_run(
             "operator_confirmed": operator_confirmed,
             "allow_overwrite_existing": False,
             "merge_strategy": "append_run_addendum",
+            "content_fingerprint": _content_fingerprint(
+                "\n".join(
+                    [
+                        worker_model_id,
+                        objective,
+                        str(summary.get("summary", "")),
+                        str(summary.get("metric_key", "")),
+                    ]
+                )
+            ),
             "worker_model_id": worker_model_id,
             "promotion_rules": {
                 "any_of": [
@@ -368,6 +503,7 @@ def generate_knowledge_drafts_from_run(
     return {
         "run_id": run_id,
         "dry_run": dry_run,
+        "side_effects_applied": not dry_run,
         "drafts_created": created_drafts,
     }
 
@@ -415,6 +551,7 @@ def promote_knowledge_drafts(
     draft_kind: str | None = None,
     operator_confirmed: bool = False,
     dry_run: bool = False,
+    draft_specs: list[dict[str, Any]] | None = None,
     repo_root: str | Path | None = None,
 ) -> dict[str, Any]:
     repo = _repo_root(repo_root)
@@ -423,20 +560,50 @@ def promote_knowledge_drafts(
     promoted: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
 
-    for metadata_path in _iter_draft_metadata_paths(draft_kind=draft_kind):
-        metadata = _json_load(metadata_path)
-        if run_id and metadata.get("source_run_id") != run_id:
-            continue
-        draft_path = Path(str(metadata_path).removesuffix(".meta.json"))
-        if not draft_path.exists():
-            skipped.append(
+    if draft_specs is None:
+        draft_sources: list[dict[str, Any]] = []
+        for metadata_path in _iter_draft_metadata_paths(draft_kind=draft_kind):
+            metadata = _json_load(metadata_path)
+            if run_id and metadata.get("source_run_id") != run_id:
+                continue
+            draft_path = Path(str(metadata_path).removesuffix(".meta.json"))
+            if not draft_path.exists():
+                skipped.append(
+                    {
+                        "draft_id": metadata.get("draft_id", draft_path.stem),
+                        "reason": "missing_draft_markdown",
+                    }
+                )
+                continue
+            draft_sources.append(
                 {
-                    "draft_id": metadata.get("draft_id", draft_path.stem),
-                    "reason": "missing_draft_markdown",
+                    "metadata": metadata,
+                    "metadata_path": metadata_path,
+                    "draft_path": draft_path,
+                    "content": draft_path.read_text(encoding="utf-8"),
                 }
             )
-            continue
+    else:
+        draft_sources = []
+        for spec in draft_specs:
+            metadata = dict(spec.get("metadata_preview", {}))
+            if run_id and metadata.get("source_run_id") != run_id:
+                continue
+            if draft_kind and metadata.get("draft_kind") != draft_kind:
+                continue
+            draft_sources.append(
+                {
+                    "metadata": metadata,
+                    "metadata_path": Path(spec.get("metadata_path", "")),
+                    "draft_path": Path(spec.get("draft_path", "")),
+                    "content": str(spec.get("body_preview", "")),
+                }
+            )
 
+    for source in draft_sources:
+        metadata = source["metadata"]
+        metadata_path = source["metadata_path"]
+        draft_path = source["draft_path"]
         reasons: list[str] = []
         for rule in metadata.get("promotion_rules", {}).get("any_of", []):
             reason = _evaluate_rule(
@@ -459,7 +626,7 @@ def promote_knowledge_drafts(
             continue
 
         target_path = repo / metadata["target_relpath"]
-        content = draft_path.read_text(encoding="utf-8")
+        content = source["content"]
         merged = False
         merge_result = "direct_write"
         if target_path.exists() and target_path.read_text(encoding="utf-8") != content:
@@ -469,6 +636,7 @@ def promote_knowledge_drafts(
                     target_content=target_path.read_text(encoding="utf-8"),
                     draft_content=content,
                     source_run_id=str(metadata.get("source_run_id", "")),
+                    fingerprint=str(metadata.get("content_fingerprint", "")),
                 )
                 merged = merge_result == "merged_addendum"
                 if merge_result == "already_merged":
@@ -499,7 +667,8 @@ def promote_knowledge_drafts(
             metadata["promoted_target_path"] = str(target_path)
             metadata["promotion_reasons"] = reasons
             metadata["merge_result"] = merge_result
-            _json_dump(metadata_path, metadata)
+            if metadata_path:
+                _json_dump(metadata_path, metadata)
 
         promoted.append(
             {
@@ -518,13 +687,14 @@ def promote_knowledge_drafts(
         "draft_kind": draft_kind,
         "operator_confirmed": operator_confirmed,
         "dry_run": dry_run,
+        "side_effects_applied": not dry_run,
         "promoted": promoted,
         "skipped": skipped,
     }
+    report["report_path"] = ""
     if not dry_run:
         _json_dump(report_path, report)
-
-    report["report_path"] = str(report_path)
+        report["report_path"] = str(report_path)
     return report
 
 
@@ -597,15 +767,19 @@ def _annotate_run_summary_with_finalize(
 
 def prune_stale_control_plane_artifacts(
     *,
-    max_age_days: int = 7,
+    max_age_days: int = 0,
     include_drafts: bool = True,
     include_queue: bool = True,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     layout = ensure_control_plane_layout()
-    cutoff = time.time() - (max_age_days * 86400)
+    now = time.time()
     removed: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+    retention_policy = {
+        "drafts": DEFAULT_DRAFT_RETENTION_DAYS if max_age_days <= 0 else max_age_days,
+        "queue": dict(QUEUE_RETENTION_POLICY_DAYS) if max_age_days <= 0 else {"default": max_age_days},
+    }
 
     if include_drafts:
         for kind in ("sop", "skill"):
@@ -616,8 +790,14 @@ def prune_stale_control_plane_artifacts(
                     metadata_path.stat().st_mtime,
                     draft_path.stat().st_mtime if draft_exists else 0,
                 )
-                if newest_mtime >= cutoff:
-                    skipped.append({"path": str(metadata_path), "reason": "recent"})
+                draft_retention_days = retention_policy["drafts"]
+                if newest_mtime >= now - (draft_retention_days * 86400):
+                    skipped.append(
+                        {
+                            "path": str(metadata_path),
+                            "reason": f"within_retention:{draft_retention_days}",
+                        }
+                    )
                     continue
                 if not dry_run:
                     if draft_exists:
@@ -632,12 +812,22 @@ def prune_stale_control_plane_artifacts(
         for path in sorted(queue_root.glob("*")):
             if not path.is_file():
                 continue
-            if path.stat().st_mtime >= cutoff:
-                skipped.append({"path": str(path), "reason": "recent"})
+            queue_kind = _queue_artifact_kind(path)
+            queue_retention_days = retention_policy["queue"].get(
+                queue_kind,
+                retention_policy["queue"].get("default", DEFAULT_DRAFT_RETENTION_DAYS),
+            )
+            if path.stat().st_mtime >= now - (queue_retention_days * 86400):
+                skipped.append(
+                    {
+                        "path": str(path),
+                        "reason": f"within_retention:{queue_retention_days}",
+                    }
+                )
                 continue
             if not dry_run:
                 path.unlink()
-            removed.append({"path": str(path), "kind": "queue_entry"})
+            removed.append({"path": str(path), "kind": "queue_entry", "queue_kind": queue_kind})
 
     report = {
         "action": "prune_stale_control_plane_artifacts",
@@ -645,9 +835,12 @@ def prune_stale_control_plane_artifacts(
         "include_drafts": include_drafts,
         "include_queue": include_queue,
         "dry_run": dry_run,
+        "side_effects_applied": not dry_run,
+        "retention_policy_days": retention_policy,
         "removed": removed,
         "skipped": skipped,
     }
+    report["report_path"] = ""
     if not dry_run:
         queue_root = Path(layout["meta_loop"])
         report_path = queue_root / f"{_now_timestamp()}-prune-report.json"
@@ -695,20 +888,49 @@ def _build_pr_body(
     selected_model_ids = summary_payload.get("selected_model_ids", {})
     resolved_models = summary_payload.get("resolved_models", {})
     promoted_block = "\n".join(f"- `{path}`" for path in promoted_targets) or "- _None_"
-    return (
-        f"# Harness Meta-Loop Export\n\n"
-        f"- `run_id`: `{run_id}`\n"
-        f"- `objective_component`: `{objective_component or 'unspecified'}`\n"
-        f"- `metric_key`: `{summary_payload.get('metric_key', '')}`\n"
-        f"- `improvements_kept`: `{summary_payload.get('improvements_kept', 0)}`\n\n"
-        "## Accepted Summary\n\n"
-        f"{summary_payload.get('summary', '')}\n\n"
-        "## Selected Models\n\n"
-        "```json\n"
-        f"{json.dumps({'selected_model_ids': selected_model_ids, 'resolved_models': resolved_models}, indent=2, ensure_ascii=False)}\n"
-        "```\n\n"
-        "## Promoted Knowledge\n\n"
-        f"{promoted_block}\n"
+    selected_models_json = json.dumps(
+        {
+            "selected_model_ids": selected_model_ids,
+            "resolved_models": resolved_models,
+        },
+        indent=2,
+        ensure_ascii=False,
+    )
+    template_text = ""
+    if META_LOOP_PR_TEMPLATE_PATH.exists():
+        template_text = META_LOOP_PR_TEMPLATE_PATH.read_text(encoding="utf-8")
+    else:
+        template_text = (
+            "## What Changed\n\n"
+            "$what_changed\n\n"
+            "## Why\n\n"
+            "$why\n\n"
+            "## Impact\n\n"
+            "$impact\n\n"
+            "## Root Cause\n\n"
+            "$root_cause\n\n"
+            "## Validation\n\n"
+            "$validation\n"
+        )
+    return Template(template_text).safe_substitute(
+        what_changed=(
+            f"- accepted run id: `{run_id}`\n"
+            f"- objective component: `{objective_component or 'unspecified'}`\n"
+            f"- metric key: `{summary_payload.get('metric_key', '')}`\n"
+            f"- improvements kept: `{summary_payload.get('improvements_kept', 0)}`"
+        ),
+        why=summary_payload.get("summary", ""),
+        impact=(
+            "Promoted knowledge:\n"
+            f"{promoted_block}\n\n"
+            "Selected models:\n"
+            f"```json\n{selected_models_json}\n```"
+        ),
+        root_cause=(
+            "This PR was generated from an accepted meta-loop run and uses the standardized "
+            "control-plane export flow."
+        ),
+        validation="- control-plane accepted-run export completed successfully",
     )
 
 
@@ -733,11 +955,11 @@ def export_meta_loop_change(
     if not objective:
         objective = "harness"
 
-    sanitized_branch = branch_name.strip() if branch_name else ""
-    if not sanitized_branch:
-        sanitized_branch = f"codex/meta-loop-{_slug(objective)}-{safe_run_id(run_id)}"
-    elif not sanitized_branch.startswith("codex/"):
-        sanitized_branch = f"codex/{_slug(sanitized_branch)}"
+    sanitized_branch = (
+        _normalize_requested_branch_name(branch_name, run_id)
+        if branch_name.strip()
+        else _default_meta_loop_branch_name(objective, run_id)
+    )
 
     commit_message = commit_message or f"meta-loop: accept {objective} run {run_id}"
     pr_title = pr_title or f"meta-loop: {objective} accepted change ({run_id})"
@@ -781,6 +1003,8 @@ def export_meta_loop_change(
         pr_body_path.write_text(body_content, encoding="utf-8")
 
     pr_url = "dry-run"
+    pr_body_path_value = ""
+    queue_entry_path_value = ""
     if not dry_run:
         push_args = ["git", "push", "-u", "origin", sanitized_branch]
         if branch_preexisting:
@@ -825,6 +1049,8 @@ def export_meta_loop_change(
     queue_entry = {
         "action": "export_meta_loop_change",
         "run_id": run_id,
+        "dry_run": dry_run,
+        "side_effects_applied": not dry_run,
         "objective_component": objective,
         "branch_name": sanitized_branch,
         "head_commit": head_commit,
@@ -833,12 +1059,15 @@ def export_meta_loop_change(
         "pr_url": pr_url,
         "promoted_targets": promoted_targets or [],
         "summary_path": str(_summary_path(run_id)),
-        "pr_body_path": str(pr_body_path),
+        "pr_body_path": "",
     }
     if not dry_run:
         _json_dump(queue_entry_path, queue_entry)
+        pr_body_path_value = str(pr_body_path)
+        queue_entry_path_value = str(queue_entry_path)
+        queue_entry["pr_body_path"] = pr_body_path_value
 
-    queue_entry["queue_entry_path"] = str(queue_entry_path)
+    queue_entry["queue_entry_path"] = queue_entry_path_value
     return queue_entry
 
 
@@ -869,6 +1098,7 @@ def finalize_accepted_meta_loop_run(
         run_id=run_id,
         operator_confirmed=operator_confirmed,
         dry_run=dry_run,
+        draft_specs=draft_result["drafts_created"] if dry_run else None,
         repo_root=repo_root,
     )
     promoted_targets = [item["target_path"] for item in promotion_result.get("promoted", [])]
@@ -898,14 +1128,18 @@ def finalize_accepted_meta_loop_run(
         )
     result = {
         "run_id": run_id,
+        "dry_run": dry_run,
+        "side_effects_applied": not dry_run,
         "drafts_created": draft_result["drafts_created"],
         "promotion_report_path": promotion_result["report_path"],
         "promoted_targets": promoted_targets,
         "export": export_result,
         "summary_path": str(_summary_path(run_id)),
         "summary_payload": summary_payload,
+        "promotion": promotion_result,
     }
+    result["finalize_path"] = ""
     if not dry_run:
         _json_dump(finalize_path, result)
-    result["finalize_path"] = str(finalize_path)
+        result["finalize_path"] = str(finalize_path)
     return result

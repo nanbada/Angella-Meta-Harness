@@ -114,6 +114,26 @@ Accepted-run finalization now does all of the following in one flow:
 
 When `dry_run=true`, draft generation, promotion, branch export, and queue writes are treated as no-op previews and must not mutate tracked files or control-plane draft state.
 
+Accepted export branch naming is deterministic:
+
+- prefix: `codex/meta-loop-`
+- objective slug is bounded
+- run id slug is bounded
+- an 8-char stable hash suffix is appended
+
+This keeps reruns stable for the same run while preventing unbounded branch names.
+
+Queue retention policy defaults:
+
+- draft markdown / metadata: 14 days
+- draft PR markdown: 14 days
+- promotion report: 21 days
+- export record: 30 days
+- finalize record: 30 days
+- prune report: 7 days
+
+Passing `max_age_days > 0` to prune overrides these defaults uniformly.
+
 ## Wheelhouse strategy
 
 An optional wheelhouse can be created with:

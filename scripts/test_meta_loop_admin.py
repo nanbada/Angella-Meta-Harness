@@ -20,6 +20,7 @@ from meta_loop_ops import (
     export_meta_loop_change,
     finalize_accepted_meta_loop_run,
     generate_knowledge_drafts_from_run,
+    promote_knowledge_drafts,
     prune_stale_control_plane_artifacts,
 )  # noqa: E402
 
@@ -184,7 +185,14 @@ def main() -> int:
             dry_run=True,
             repo_root=repo,
         )
+        assert dry_run_finalize["dry_run"] is True
+        assert dry_run_finalize["side_effects_applied"] is False
         assert dry_run_finalize["export"]["pr_url"] == "dry-run"
+        assert dry_run_finalize["export"]["queue_entry_path"] == ""
+        assert dry_run_finalize["export"]["pr_body_path"] == ""
+        assert dry_run_finalize["promotion"]["dry_run"] is True
+        assert dry_run_finalize["promotion"]["side_effects_applied"] is False
+        assert dry_run_finalize["finalize_path"] == ""
         assert _run(["git", "branch", "--show-current"], cwd=repo, env=env) == "main"
         assert not any((control_plane / "knowledge" / "sops").glob("failure-threshold-not-met.md.meta.json"))
         assert not any((control_plane / "knowledge" / "skills").glob("worker-ollama-gemma4-26b.md.meta.json"))
@@ -221,6 +229,7 @@ def main() -> int:
         assert summary_payload["export"]["pr_url"] == "https://example.com/pr/123"
         assert summary_payload["promotion"]["promoted"]
         assert "Meta-loop export: branch=" in summary_payload["summary"]
+        assert sop_content.count("Accepted Run Addendum - `angella-meta-run`") == 1
 
         current_branch = _run(["git", "branch", "--show-current"], cwd=repo, env=env)
         assert current_branch.startswith("codex/")
@@ -231,6 +240,39 @@ def main() -> int:
             env=env,
         )
         assert current_branch in remote_head.splitlines()
+
+        run_id_two = "angella-meta-run-two"
+        _write_json(
+            control_plane / "runs" / run_id_two / "summary.json",
+            {
+                "run_id": run_id_two,
+                "project_name": "Angella",
+                "total_iterations": 1,
+                "metric_key": "build_time",
+                "initial_metric": 12.5,
+                "final_metric": 10.2,
+                "improvements_kept": 1,
+                "summary": "Accepted harness change reduced setup-check runtime and stabilized retries.",
+                "selected_model_ids": {
+                    "worker": "ollama_gemma4_26b",
+                },
+                "resolved_models": {
+                    "worker": {"provider": "ollama", "model": "gemma4:26b"},
+                },
+                "failure_causes": ["threshold_not_met"],
+                "harness_metadata": {"objective_component": "setup-check"},
+                "kept_changes": [{"iteration": 1, "candidate_commit": "ghi789"}],
+            },
+        )
+        second_drafts = generate_knowledge_drafts_from_run(run_id_two, objective_component="setup-check")
+        second_promotion = promote_knowledge_drafts(
+            run_id=run_id_two,
+            repo_root=repo,
+        )
+        assert second_drafts["dry_run"] is False
+        assert any("already_merged" in item["reasons"] for item in second_promotion["promoted"])
+        sop_after_dedupe = (repo / "knowledge" / "sops" / "failure-threshold-not-met.md").read_text(encoding="utf-8")
+        assert sop_after_dedupe.count("Accepted Run Addendum - `angella-meta-run`") == 1
 
         _run(["git", "switch", "-c", "retry-source"], cwd=repo, env=env)
         (repo / "retry-change.txt").write_text("retry export state\n", encoding="utf-8")
@@ -243,29 +285,69 @@ def main() -> int:
         )
         retry_branch = retry_export["branch_name"]
         assert retry_branch == current_branch
+        assert len(retry_branch) <= 96
         assert _run(["git", "branch", "--show-current"], cwd=repo, env=env) == retry_branch
         assert (repo / "retry-change.txt").is_file()
         assert "retry-change.txt" in _run(["git", "show", "--stat", "--oneline", "HEAD"], cwd=repo, env=env)
 
+        long_run_id = "angella-" + ("very-long-component-name-" * 4).strip("-")
+        _write_json(
+            control_plane / "runs" / long_run_id / "summary.json",
+            {
+                "run_id": long_run_id,
+                "improvements_kept": 1,
+                "summary": "Long branch naming preview.",
+                "harness_metadata": {"objective_component": "very-long-component-name-for-preview"},
+                "selected_model_ids": {"worker": "ollama_gemma4_26b"},
+                "resolved_models": {"worker": {"provider": "ollama", "model": "gemma4:26b"}},
+                "kept_changes": [{"iteration": 1, "candidate_commit": "abc123"}],
+            },
+        )
+        long_preview = export_meta_loop_change(
+            long_run_id,
+            objective_component="very-long-component-name-for-preview",
+            dry_run=True,
+            repo_root=repo,
+        )
+        assert long_preview["dry_run"] is True
+        assert long_preview["queue_entry_path"] == ""
+        assert len(long_preview["branch_name"]) <= 96
+
         stale_metadata = control_plane / "knowledge" / "sops" / "stale-item.md.meta.json"
         stale_markdown = control_plane / "knowledge" / "sops" / "stale-item.md"
         stale_queue = control_plane / "queue" / "meta-loop" / "old-entry.json"
+        stale_prune_report = control_plane / "queue" / "meta-loop" / "old-prune-report.json"
+        retained_finalize = control_plane / "queue" / "meta-loop" / "retained-finalize.json"
         _write_json(stale_metadata, {"draft_id": "stale-item", "status": "draft"})
         stale_markdown.write_text("# stale\n", encoding="utf-8")
         _write_json(stale_queue, {"action": "stale"})
-        old_time = time.time() - (3 * 86400)
+        _write_json(stale_prune_report, {"action": "old-prune-report"})
+        _write_json(retained_finalize, {"action": "retained-finalize"})
+        old_time = time.time() - (20 * 86400)
+        old_prune_time = time.time() - (10 * 86400)
+        retained_finalize_time = time.time() - (10 * 86400)
         os.utime(stale_metadata, (old_time, old_time))
         os.utime(stale_markdown, (old_time, old_time))
         os.utime(stale_queue, (old_time, old_time))
+        os.utime(stale_prune_report, (old_prune_time, old_prune_time))
+        os.utime(retained_finalize, (retained_finalize_time, retained_finalize_time))
 
-        prune_result = prune_stale_control_plane_artifacts(max_age_days=1)
+        prune_preview = prune_stale_control_plane_artifacts(dry_run=True)
+        assert prune_preview["dry_run"] is True
+        assert prune_preview["side_effects_applied"] is False
+        assert prune_preview["report_path"] == ""
+
+        prune_result = prune_stale_control_plane_artifacts(max_age_days=0)
         removed_paths = {item["path"] for item in prune_result["removed"]}
-        assert str(stale_metadata) in removed_paths
-        assert str(stale_markdown) in removed_paths
-        assert str(stale_queue) in removed_paths
+        assert prune_result["retention_policy_days"]["drafts"] == 14
+        assert str(stale_prune_report) in removed_paths
+        assert str(stale_queue) not in removed_paths
+        assert str(retained_finalize) not in removed_paths
         assert not stale_metadata.exists()
         assert not stale_markdown.exists()
-        assert not stale_queue.exists()
+        assert stale_queue.exists()
+        assert not stale_prune_report.exists()
+        assert retained_finalize.exists()
 
     print("meta loop admin tests passed")
     return 0

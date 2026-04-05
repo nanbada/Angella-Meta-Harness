@@ -232,6 +232,14 @@ Accepted harness meta-loop run은 다음을 자동으로 수행할 수 있습니
 
 `dry_run=true` 경로는 preview 전용이며 draft 파일, queue entry, branch 상태를 실제로 바꾸지 않습니다.
 
+Accepted export branch는 deterministic naming policy를 사용합니다.
+
+- prefix: `codex/meta-loop-`
+- objective와 run id slug는 길이 제한이 있다
+- 마지막에 stable hash suffix가 붙는다
+
+preview worker를 다시 도입할 때는 [`docs/preview-worker-reintroduction.md`](/Users/nanbada/projects/Angella/docs/preview-worker-reintroduction.md) 의 gating 전략을 따른다.
+
 ## 프로젝트별 Adapter
 
 기본 flow는 generic benchmark MCP를 사용합니다. 아래 adapter는 같은 출력 계약과 `run_benchmark`/`compare_metrics` 인터페이스를 제공하는 선택형 대체재입니다.
