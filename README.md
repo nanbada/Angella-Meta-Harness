@@ -230,6 +230,7 @@ Accepted harness meta-loop run은 다음을 자동으로 수행할 수 있습니
 - `codex/` 브랜치 push + draft PR 생성
 - stale draft / queue artifact 정리
 - inspection tool로 recent runs / failures / drafts / queue 상태 조회
+- component description tool로 benchmark command / acceptance checks / priority files 조회
 
 `dry_run=true` 경로는 preview 전용이며 draft 파일, queue entry, branch 상태를 실제로 바꾸지 않습니다.
 

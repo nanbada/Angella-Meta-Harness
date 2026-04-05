@@ -20,6 +20,7 @@ from control_plane import append_jsonl, ensure_control_plane_layout, run_dir, sa
 ANGELLA_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_LOG_ROOT = ANGELLA_ROOT / "logs" / "Goose Logs"
 META_LOOP_PR_TEMPLATE_PATH = ANGELLA_ROOT / "templates" / "meta-loop-pr.md.tmpl"
+BOOTSTRAP_PYTHON = ANGELLA_ROOT / ".cache" / "angella" / "bootstrap-venv" / "bin" / "python"
 BRANCH_PREFIX = "codex/meta-loop"
 MAX_BRANCH_LENGTH = 96
 BRANCH_OBJECTIVE_SLUG_MAX = 20
@@ -40,6 +41,99 @@ def queue_retention_policy_days() -> dict[str, Any]:
         "drafts": DEFAULT_DRAFT_RETENTION_DAYS,
         "queue": dict(QUEUE_RETENTION_POLICY_DAYS),
     }
+
+
+def harness_component_context(objective_component: str) -> dict[str, Any]:
+    component = objective_component.strip() or "recipe-runtime"
+    contexts = {
+        "setup-check": {
+            "component": "setup-check",
+            "metric_key": "build_time",
+            "benchmark_command": "bash setup.sh --check",
+            "working_directory": str(ANGELLA_ROOT),
+            "binary_acceptance_checks": [
+                "setup check exits 0",
+                "template rendering checks passed",
+            ],
+            "priority_files": [
+                "setup.sh",
+                "scripts/setup-bootstrap.sh",
+                "scripts/setup-install.sh",
+                "scripts/setup-common.sh",
+            ],
+            "notes": "Focus on installer preflight and render-time behavior. Avoid repo-wide exploration.",
+        },
+        "setup-yes-warm": {
+            "component": "setup-yes-warm",
+            "metric_key": "build_time",
+            "benchmark_command": "bash scripts/test_setup_flows.sh",
+            "working_directory": str(ANGELLA_ROOT),
+            "binary_acceptance_checks": [
+                "setup flow tests pass",
+                "bootstrap/install/yes flows all complete",
+            ],
+            "priority_files": [
+                "scripts/test_setup_flows.sh",
+                "scripts/setup-common.sh",
+                "scripts/setup-install.sh",
+            ],
+            "notes": "Use the existing setup flow test as the warm-path benchmark.",
+        },
+        "setup-yes-cold": {
+            "component": "setup-yes-cold",
+            "metric_key": "build_time",
+            "benchmark_command": "bash scripts/test_setup_flows.sh",
+            "working_directory": str(ANGELLA_ROOT),
+            "binary_acceptance_checks": [
+                "setup flow tests pass",
+                "cold-path assumptions are still portable",
+            ],
+            "priority_files": [
+                "scripts/test_setup_flows.sh",
+                "scripts/setup-bootstrap.sh",
+                "scripts/setup-common.sh",
+            ],
+            "notes": "Cold-path work should stay deterministic and avoid host-specific shortcuts.",
+        },
+        "profile-resolution": {
+            "component": "profile-resolution",
+            "metric_key": "build_time",
+            "benchmark_command": "python3 scripts/harness_catalog.py list-profiles",
+            "working_directory": str(ANGELLA_ROOT),
+            "binary_acceptance_checks": [
+                "profile listing exits 0",
+                "default resolves to Gemma4",
+            ],
+            "priority_files": [
+                "config/harness-models.yaml",
+                "config/harness-profiles.yaml",
+                "scripts/harness_catalog.py",
+            ],
+            "notes": "Keep role resolution deterministic and avoid broad codebase scans.",
+        },
+        "recipe-runtime": {
+            "component": "recipe-runtime",
+            "metric_key": "build_time",
+            "benchmark_command": f"{BOOTSTRAP_PYTHON} scripts/test_harness_self_optimize_adapter.py",
+            "working_directory": str(ANGELLA_ROOT),
+            "binary_acceptance_checks": [
+                "harness self-optimize adapter tests pass",
+                "inspection, promotion, export, and retention paths stay callable",
+            ],
+            "priority_files": [
+                "recipes/harness-self-optimize.yaml",
+                "mcp-servers/meta_loop_ops.py",
+                "mcp-servers/control_plane_admin.py",
+                "scripts/test_harness_self_optimize_adapter.py",
+                "scripts/test_meta_loop_admin.py",
+            ],
+            "notes": (
+                "Stay tightly scoped to the self-optimize recipe and control-plane admin flow. "
+                "Do not tree/analyze the entire repository when these files are sufficient."
+            ),
+        },
+    }
+    return contexts.get(component, contexts["recipe-runtime"])
 
 
 def _now_timestamp() -> str:

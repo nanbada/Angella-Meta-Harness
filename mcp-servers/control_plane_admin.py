@@ -12,6 +12,7 @@ from meta_loop_ops import (
     export_meta_loop_change,
     finalize_accepted_meta_loop_run,
     generate_knowledge_drafts_from_run,
+    harness_component_context,
     inspect_control_plane,
     prune_stale_control_plane_artifacts,
     promote_knowledge_drafts,
@@ -114,6 +115,17 @@ async def list_tools() -> list[types.Tool]:
                 },
             },
         ),
+        types.Tool(
+            name="describe_harness_component",
+            description="objective_component별 benchmark command, acceptance checks, 우선 파일 경로를 반환합니다.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "objective_component": {"type": "string"}
+                },
+                "required": ["objective_component"],
+            },
+        ),
     ]
 
 
@@ -187,6 +199,9 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 queue_limit=arguments.get("queue_limit", 10),
             )
         )
+
+    if name == "describe_harness_component":
+        return text_response(harness_component_context(arguments["objective_component"]))
 
     return text_response({"success": False, "error": f"Unknown tool: {name}"})
 

@@ -121,6 +121,12 @@ Read-only inspection is available through the control-plane admin tool and summa
 - recent queue artifacts
 - retention policy
 
+Component-scoped guidance is also available through the control-plane admin tool:
+
+- benchmark command for each harness component
+- default acceptance checks
+- priority file list to keep live self-optimize runs from exploring the whole repo
+
 When `dry_run=true`, draft generation, promotion, branch export, and queue writes are treated as no-op previews and must not mutate tracked files or control-plane draft state.
 
 Accepted export branch naming is deterministic:
