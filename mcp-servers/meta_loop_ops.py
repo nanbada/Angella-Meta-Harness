@@ -55,7 +55,14 @@ def harness_component_context(objective_component: str) -> dict[str, Any]:
                 "setup check exits 0",
                 "template rendering checks passed",
             ],
+            "success_signal": "setup.sh --check exits 0 and reports template rendering checks passed",
             "priority_files": [
+                "setup.sh",
+                "scripts/setup-bootstrap.sh",
+                "scripts/setup-install.sh",
+                "scripts/setup-common.sh",
+            ],
+            "allowed_fix_surface": [
                 "setup.sh",
                 "scripts/setup-bootstrap.sh",
                 "scripts/setup-install.sh",
@@ -72,7 +79,13 @@ def harness_component_context(objective_component: str) -> dict[str, Any]:
                 "setup flow tests pass",
                 "bootstrap/install/yes flows all complete",
             ],
+            "success_signal": "setup flow regression stays green across bootstrap, install, and --yes paths",
             "priority_files": [
+                "scripts/test_setup_flows.sh",
+                "scripts/setup-common.sh",
+                "scripts/setup-install.sh",
+            ],
+            "allowed_fix_surface": [
                 "scripts/test_setup_flows.sh",
                 "scripts/setup-common.sh",
                 "scripts/setup-install.sh",
@@ -88,7 +101,13 @@ def harness_component_context(objective_component: str) -> dict[str, Any]:
                 "setup flow tests pass",
                 "cold-path assumptions are still portable",
             ],
+            "success_signal": "cold-path setup flow test passes without host-specific shortcuts",
             "priority_files": [
+                "scripts/test_setup_flows.sh",
+                "scripts/setup-bootstrap.sh",
+                "scripts/setup-common.sh",
+            ],
+            "allowed_fix_surface": [
                 "scripts/test_setup_flows.sh",
                 "scripts/setup-bootstrap.sh",
                 "scripts/setup-common.sh",
@@ -98,13 +117,19 @@ def harness_component_context(objective_component: str) -> dict[str, Any]:
         "profile-resolution": {
             "component": "profile-resolution",
             "metric_key": "build_time",
-            "benchmark_command": "python3 scripts/harness_catalog.py list-profiles",
+            "benchmark_command": f"{BOOTSTRAP_PYTHON} scripts/harness_catalog.py list-profiles",
             "working_directory": str(ANGELLA_ROOT),
             "binary_acceptance_checks": [
                 "profile listing exits 0",
                 "default resolves to Gemma4",
             ],
+            "success_signal": "profile listing exits 0 and default worker resolves to Gemma4",
             "priority_files": [
+                "config/harness-models.yaml",
+                "config/harness-profiles.yaml",
+                "scripts/harness_catalog.py",
+            ],
+            "allowed_fix_surface": [
                 "config/harness-models.yaml",
                 "config/harness-profiles.yaml",
                 "scripts/harness_catalog.py",
@@ -120,7 +145,17 @@ def harness_component_context(objective_component: str) -> dict[str, Any]:
                 "harness self-optimize adapter tests pass",
                 "inspection, promotion, export, and retention paths stay callable",
             ],
+            "success_signal": (
+                "adapter benchmark completes and the recipe exits via accepted, revert, or verification-only"
+            ),
             "priority_files": [
+                "recipes/harness-self-optimize.yaml",
+                "mcp-servers/meta_loop_ops.py",
+                "mcp-servers/control_plane_admin.py",
+                "scripts/test_harness_self_optimize_adapter.py",
+                "scripts/test_meta_loop_admin.py",
+            ],
+            "allowed_fix_surface": [
                 "recipes/harness-self-optimize.yaml",
                 "mcp-servers/meta_loop_ops.py",
                 "mcp-servers/control_plane_admin.py",
@@ -389,6 +424,10 @@ def _log_final_report_path(run_id: str) -> Path:
     return DEFAULT_LOG_ROOT / f"{safe_run_id(run_id)}-FINAL.md"
 
 
+def _verification_report_path(run_id: str) -> Path:
+    return run_dir(run_id) / "report.md"
+
+
 def _compact_text(value: str, limit: int = 240) -> str:
     normalized = re.sub(r"\s+", " ", value.strip())
     if len(normalized) <= limit:
@@ -472,6 +511,132 @@ def _build_skill_body(
         "## Validation\n\n"
         f"{_bullet_block(acceptance_checks, empty_text='Re-run the worker-specific benchmark and finalize checks.')}\n"
     )
+
+
+def _run_entry(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    harness_metadata = payload.get("harness_metadata", {})
+    objective_component = ""
+    if isinstance(harness_metadata, dict):
+        objective_component = str(harness_metadata.get("objective_component", "")).strip()
+    return {
+        "run_id": payload.get("run_id", path.parent.name),
+        "summary_path": str(path),
+        "run_kind": str(payload.get("run_kind", "")).strip()
+        or ("verification_only" if payload.get("verification_only") else "accepted" if _is_accepted_summary(payload) else "run"),
+        "objective_component": objective_component,
+        "metric_key": payload.get("metric_key", ""),
+        "improvements_kept": payload.get("improvements_kept", 0),
+        "run_branch": payload.get("run_branch", ""),
+        "export_branch": payload.get("export", {}).get("branch_name", ""),
+        "pr_url": payload.get("export", {}).get("pr_url", ""),
+        "report_path": payload.get("report_path", ""),
+        "summary": payload.get("summary", ""),
+    }
+
+
+def _markdown_section(title: str, items: list[str], *, empty_text: str) -> str:
+    lines = [f"## {title}", ""]
+    if items:
+        lines.extend(items)
+    else:
+        lines.append(f"- {empty_text}")
+    return "\n".join(lines)
+
+
+def _retention_due_soon(*, draft_limit: int, queue_limit: int, horizon_days: int = 3) -> list[dict[str, Any]]:
+    layout = ensure_control_plane_layout()
+    now = time.time()
+    horizon_seconds = horizon_days * 86400
+    due: list[dict[str, Any]] = []
+
+    for kind in ("sop", "skill"):
+        for metadata_path in sorted(_knowledge_dir(kind).glob("*.md.meta.json")):
+            draft_path = Path(str(metadata_path).removesuffix(".meta.json"))
+            newest_mtime = max(
+                metadata_path.stat().st_mtime,
+                draft_path.stat().st_mtime if draft_path.exists() else 0,
+            )
+            expires_at = newest_mtime + (DEFAULT_DRAFT_RETENTION_DAYS * 86400)
+            if expires_at > now + horizon_seconds:
+                continue
+            due.append(
+                {
+                    "path": str(metadata_path),
+                    "kind": "draft",
+                    "retention_days": DEFAULT_DRAFT_RETENTION_DAYS,
+                    "days_until_prune": int((expires_at - now) // 86400),
+                }
+            )
+
+    queue_root = Path(layout["meta_loop"])
+    for path in sorted(queue_root.glob("*")):
+        if not path.is_file():
+            continue
+        kind = _queue_artifact_kind(path)
+        retention_days = QUEUE_RETENTION_POLICY_DAYS.get(kind, QUEUE_RETENTION_POLICY_DAYS["default"])
+        expires_at = path.stat().st_mtime + (retention_days * 86400)
+        if expires_at > now + horizon_seconds:
+            continue
+        due.append(
+            {
+                "path": str(path),
+                "kind": kind,
+                "retention_days": retention_days,
+                "days_until_prune": int((expires_at - now) // 86400),
+            }
+        )
+
+    due.sort(key=lambda item: (item["days_until_prune"], item["path"]))
+    return due[: max(draft_limit, queue_limit)]
+
+
+def _render_control_plane_markdown(payload: dict[str, Any]) -> str:
+    accepted_items = [
+        (
+            f"- `{item['run_id']}`"
+            f" (`{item.get('objective_component') or 'unspecified'}`)"
+            f" improvements_kept=`{item.get('improvements_kept', 0)}`"
+            + (f" pr=`{item.get('pr_url', '')}`" if item.get("pr_url") else "")
+        )
+        for item in payload.get("recent_accepted_runs", [])
+    ]
+    verification_items = [
+        (
+            f"- `{item['run_id']}`"
+            f" (`{item.get('objective_component') or 'unspecified'}`)"
+            f" report=`{item.get('report_path', '') or 'missing'}`"
+        )
+        for item in payload.get("recent_verification_only_runs", [])
+    ]
+    failure_items = [
+        f"- `{item['failure_type']}`: `{item['count']}` open"
+        for item in payload.get("open_failures_by_type", [])
+    ]
+    draft_kind_items = [
+        f"- `{kind}`: `{count}` pending"
+        for kind, count in sorted(payload.get("pending_drafts_by_kind", {}).items())
+    ]
+    retention_items = [
+        (
+            f"- `{item['kind']}`: `{item['path']}`"
+            f" (`days_until_prune={item.get('days_until_prune', 0)}`)"
+        )
+        for item in payload.get("retention_due_soon", [])
+    ]
+    sections = [
+        "# Control-Plane Overview",
+        "",
+        _markdown_section("Recent Accepted Runs", accepted_items, empty_text="_None_"),
+        "",
+        _markdown_section("Recent Verification-Only Runs", verification_items, empty_text="_None_"),
+        "",
+        _markdown_section("Open Failures By Type", failure_items, empty_text="_None_"),
+        "",
+        _markdown_section("Pending Drafts By Kind", draft_kind_items, empty_text="_None_"),
+        "",
+        _markdown_section("Retention / Prune Due Soon", retention_items, empty_text="_None_"),
+    ]
+    return "\n".join(sections).strip() + "\n"
 
 
 def _write_draft(
@@ -900,6 +1065,7 @@ def inspect_control_plane(
     failure_limit: int = 10,
     draft_limit: int = 10,
     queue_limit: int = 10,
+    format: str = "json",
 ) -> dict[str, Any]:
     layout = ensure_control_plane_layout()
     runs_root = Path(layout["runs"])
@@ -907,45 +1073,51 @@ def inspect_control_plane(
     queue_root = Path(layout["meta_loop"])
 
     recent_runs = []
+    recent_accepted_runs = []
+    recent_verification_only_runs = []
     run_summaries = sorted(runs_root.glob("*/summary.json"), key=lambda path: path.stat().st_mtime, reverse=True)
-    for path in run_summaries[:run_limit]:
+    for path in run_summaries:
         try:
             payload = _json_load(path)
         except Exception:
             continue
-        recent_runs.append(
-            {
-                "run_id": payload.get("run_id", path.parent.name),
-                "summary_path": str(path),
-                "metric_key": payload.get("metric_key", ""),
-                "improvements_kept": payload.get("improvements_kept", 0),
-                "run_branch": payload.get("run_branch", ""),
-                "export_branch": payload.get("export", {}).get("branch_name", ""),
-                "pr_url": payload.get("export", {}).get("pr_url", ""),
-            }
-        )
+        entry = _run_entry(path, payload)
+        recent_runs.append(entry)
+        if entry["run_kind"] == "verification_only":
+            recent_verification_only_runs.append(entry)
+        elif _is_accepted_summary(payload):
+            recent_accepted_runs.append(entry)
+    recent_runs = recent_runs[:run_limit]
+    recent_accepted_runs = recent_accepted_runs[:run_limit]
+    recent_verification_only_runs = recent_verification_only_runs[:run_limit]
 
     open_failures = []
+    open_failures_by_type: dict[str, int] = {}
     for path in sorted(open_failures_root.glob("*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[:failure_limit]:
         try:
             payload = _json_load(path)
         except Exception:
             continue
+        failure_type = payload.get("failure_type", "")
         open_failures.append(
             {
                 "path": str(path),
-                "failure_type": payload.get("failure_type", ""),
+                "failure_type": failure_type,
                 "component": payload.get("component", ""),
                 "source_run_id": payload.get("source_run_id", ""),
             }
         )
+        if failure_type:
+            open_failures_by_type[str(failure_type)] = open_failures_by_type.get(str(failure_type), 0) + 1
 
     pending_drafts = []
+    pending_drafts_by_kind: dict[str, int] = {}
     for kind in ("sop", "skill"):
         for path in sorted(_knowledge_dir(kind).glob("*.md.meta.json"), key=lambda item: item.stat().st_mtime, reverse=True):
             payload = _json_load(path)
             if payload.get("status") == "promoted":
                 continue
+            pending_drafts_by_kind[kind] = pending_drafts_by_kind.get(kind, 0) + 1
             pending_drafts.append(
                 {
                     "draft_id": payload.get("draft_id", path.stem),
@@ -970,14 +1142,58 @@ def inspect_control_plane(
     current_selection_path = Path(layout["root"]) / "current-selection.json"
     current_selection = _json_load(current_selection_path) if current_selection_path.exists() else {}
 
-    return {
+    payload = {
+        "format": "json",
         "recent_runs": recent_runs,
+        "recent_accepted_runs": recent_accepted_runs,
+        "recent_verification_only_runs": recent_verification_only_runs,
         "open_failures": open_failures,
+        "open_failures_by_type": [
+            {"failure_type": failure_type, "count": count}
+            for failure_type, count in sorted(open_failures_by_type.items(), key=lambda item: (-item[1], item[0]))
+        ],
         "pending_drafts": pending_drafts,
+        "pending_drafts_by_kind": pending_drafts_by_kind,
         "recent_queue": recent_queue,
+        "retention_due_soon": _retention_due_soon(draft_limit=draft_limit, queue_limit=queue_limit),
         "retention_policy_days": queue_retention_policy_days(),
         "current_selection": current_selection,
     }
+    if format == "markdown":
+        payload["format"] = "markdown"
+        payload["content"] = _render_control_plane_markdown(payload)
+    return payload
+
+
+def _build_verification_only_report(
+    *,
+    run_id: str,
+    objective_component: str,
+    benchmark_command: str,
+    metric_key: str,
+    metric_value: float,
+    summary: str,
+    working_directory: str,
+    branch_name: str,
+    finalize_skipped_reason: str,
+) -> str:
+    return (
+        "# Verification-Only Run Report\n\n"
+        "## Run\n\n"
+        f"- run id: `{run_id}`\n"
+        f"- objective component: `{objective_component or 'unspecified'}`\n"
+        f"- branch: `{branch_name or 'unspecified'}`\n\n"
+        "## Benchmark\n\n"
+        f"- command: `{benchmark_command}`\n"
+        f"- metric: `{metric_key}`\n"
+        f"- value: `{metric_value}`\n"
+        f"- working directory: `{working_directory}`\n\n"
+        "## Outcome\n\n"
+        f"- summary: {summary}\n"
+        f"- finalize skipped reason: {finalize_skipped_reason}\n"
+        "- export: not executed\n"
+        "- knowledge promotion: not executed\n"
+    )
 
 
 def record_verification_only_run(
@@ -990,10 +1206,38 @@ def record_verification_only_run(
     summary: str,
     working_directory: str,
     branch_name: str = "",
+    finalize_skipped_reason: str = "",
 ) -> dict[str, Any]:
     run_path = run_dir(run_id)
+    recorded_at = _now_timestamp()
+    report_path = _verification_report_path(run_id)
+    skip_reason = (
+        finalize_skipped_reason.strip()
+        or "verification-only run recorded without an accepted patch; finalize/export skipped"
+    )
+    report_content = _build_verification_only_report(
+        run_id=run_id,
+        objective_component=objective_component,
+        benchmark_command=benchmark_command,
+        metric_key=metric_key,
+        metric_value=metric_value,
+        summary=summary,
+        working_directory=working_directory,
+        branch_name=branch_name,
+        finalize_skipped_reason=skip_reason,
+    )
+    report_path.write_text(report_content, encoding="utf-8")
+    benchmark_result = {
+        "iteration": 0,
+        "decision": "verification_only",
+        "metric_key": metric_key,
+        "metric_value": metric_value,
+        "summary": summary,
+        "benchmark_command": benchmark_command,
+    }
     payload = {
         "run_id": run_id,
+        "run_kind": "verification_only",
         "verification_only": True,
         "objective_component": objective_component,
         "benchmark_command": benchmark_command,
@@ -1002,19 +1246,32 @@ def record_verification_only_run(
         "summary": summary,
         "working_directory": working_directory,
         "branch_name": branch_name,
-        "recorded_at": _now_timestamp(),
+        "report_path": str(report_path),
+        "finalize_skipped_reason": skip_reason,
+        "benchmark_results": [benchmark_result],
+        "recorded_at": recorded_at,
     }
     summary_path = run_path / "summary.json"
     if summary_path.exists():
         existing = _json_load(summary_path)
+        existing["run_kind"] = "verification_only"
         existing["verification_only"] = True
         existing["summary"] = summary
         existing["benchmark_command"] = benchmark_command
         existing["metric_key"] = metric_key
+        existing["metric_value"] = metric_value
         existing["final_metric"] = metric_value
         existing["working_directory"] = working_directory
         existing["run_branch"] = branch_name or existing.get("run_branch", "")
-        existing["verification_recorded_at"] = payload["recorded_at"]
+        existing["verification_recorded_at"] = recorded_at
+        existing["report_path"] = str(report_path)
+        existing["finalize_skipped_reason"] = skip_reason
+        benchmark_results = existing.get("benchmark_results")
+        if not isinstance(benchmark_results, list):
+            benchmark_results = []
+        benchmark_results = [item for item in benchmark_results if item.get("decision") != "verification_only"]
+        benchmark_results.append(benchmark_result)
+        existing["benchmark_results"] = benchmark_results
         _json_dump(summary_path, existing)
         payload["summary_path"] = str(summary_path)
         payload["summary_payload"] = existing
@@ -1035,6 +1292,8 @@ def record_verification_only_run(
             "metric_value": metric_value,
             "summary": summary,
             "branch_name": branch_name,
+            "report_path": str(report_path),
+            "finalize_skipped_reason": skip_reason,
         },
     )
     return payload
@@ -1176,6 +1435,8 @@ def _build_pr_body(
         template_text = META_LOOP_PR_TEMPLATE_PATH.read_text(encoding="utf-8")
     else:
         template_text = (
+            "## Merge Intent\n\n"
+            "$merge_intent\n\n"
             "## What Changed\n\n"
             "$what_changed\n\n"
             "## Why\n\n"
@@ -1188,6 +1449,10 @@ def _build_pr_body(
             "$validation\n"
         )
     return Template(template_text).safe_substitute(
+        merge_intent=(
+            "Reference proof only. Not intended for merge.\n\n"
+            "Primary structure PR: #6."
+        ),
         what_changed=(
             f"- accepted run id: `{run_id}`\n"
             f"- objective component: `{objective_component or 'unspecified'}`\n"

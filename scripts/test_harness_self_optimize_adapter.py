@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -63,11 +64,27 @@ async def main() -> int:
     assert python_payload["metric_key"] == "tokens_per_second"
     assert python_payload["metric_value"] == 42.0
 
-    component = harness_component_context("recipe-runtime")
-    assert component["metric_key"] == "build_time"
-    assert component["benchmark_command"].endswith(" scripts/test_harness_self_optimize_adapter.py")
-    assert ".cache/angella/bootstrap-venv/bin/python" in component["benchmark_command"]
-    assert "mcp-servers/meta_loop_ops.py" in component["priority_files"]
+    recipe_runtime = harness_component_context("recipe-runtime")
+    assert recipe_runtime["metric_key"] == "build_time"
+    assert recipe_runtime["benchmark_command"].endswith(" scripts/test_harness_self_optimize_adapter.py")
+    assert ".cache/angella/bootstrap-venv/bin/python" in recipe_runtime["benchmark_command"]
+    assert "mcp-servers/meta_loop_ops.py" in recipe_runtime["priority_files"]
+    assert recipe_runtime["success_signal"]
+    assert recipe_runtime["allowed_fix_surface"]
+
+    profile_resolution = harness_component_context("profile-resolution")
+    assert profile_resolution["benchmark_command"].endswith(" scripts/harness_catalog.py list-profiles")
+    assert profile_resolution["success_signal"]
+    assert profile_resolution["allowed_fix_surface"]
+    legacy_python = Path("/usr/bin/python3")
+    if legacy_python.exists():
+        subprocess.run(
+            [str(legacy_python), str(ROOT_DIR / "scripts" / "harness_catalog.py"), "list-profiles"],
+            cwd=str(ROOT_DIR),
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     recipe_text = (ROOT_DIR / "recipes" / "harness-self-optimize.yaml").read_text(encoding="utf-8")
     assert "name: metric-benchmark" in recipe_text
@@ -75,6 +92,8 @@ async def main() -> int:
     assert "finalize_accepted_meta_loop_run" in recipe_text
     assert "inspect_control_plane" in recipe_text
     assert "describe_harness_component" in recipe_text
+    assert "format=markdown" in recipe_text
+    assert "record_verification_only_run" in recipe_text
 
     print("harness self-optimize adapter tests passed")
     return 0

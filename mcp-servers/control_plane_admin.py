@@ -112,13 +112,14 @@ async def list_tools() -> list[types.Tool]:
                     "run_limit": {"type": "integer", "default": 5},
                     "failure_limit": {"type": "integer", "default": 10},
                     "draft_limit": {"type": "integer", "default": 10},
-                    "queue_limit": {"type": "integer", "default": 10}
+                    "queue_limit": {"type": "integer", "default": 10},
+                    "format": {"type": "string", "enum": ["json", "markdown"], "default": "json"},
                 },
             },
         ),
         types.Tool(
             name="describe_harness_component",
-            description="objective_component별 benchmark command, acceptance checks, 우선 파일 경로를 반환합니다.",
+            description="objective_component별 benchmark command, acceptance checks, success signal, 우선 파일 경로를 반환합니다.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -141,6 +142,7 @@ async def list_tools() -> list[types.Tool]:
                     "summary": {"type": "string"},
                     "working_directory": {"type": "string"},
                     "branch_name": {"type": "string", "default": ""},
+                    "finalize_skipped_reason": {"type": "string", "default": ""},
                 },
                 "required": [
                     "run_id",
@@ -224,6 +226,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 failure_limit=arguments.get("failure_limit", 10),
                 draft_limit=arguments.get("draft_limit", 10),
                 queue_limit=arguments.get("queue_limit", 10),
+                format=arguments.get("format", "json"),
             )
         )
 
@@ -241,6 +244,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 summary=arguments["summary"],
                 working_directory=arguments["working_directory"],
                 branch_name=arguments.get("branch_name", ""),
+                finalize_skipped_reason=arguments.get("finalize_skipped_reason", ""),
             )
         )
 

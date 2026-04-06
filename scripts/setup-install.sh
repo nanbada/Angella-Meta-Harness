@@ -36,5 +36,7 @@ mkdir -p "$SCRIPT_DIR/logs/Goose Logs"
 ok "Log directory created: $SCRIPT_DIR/logs/Goose Logs/"
 
 create_control_plane_layout
+write_bootstrap_state
+write_install_state_summary
 write_harness_resolution_snapshot
 report_harness_credential_status

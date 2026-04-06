@@ -1,3 +1,7 @@
+## Merge Intent
+
+- describe whether this PR is merge-target or reference-only
+
 ## What Changed
 
 - describe the actual code, config, or docs changes

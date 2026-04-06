@@ -147,6 +147,10 @@ INSTALL_ERR="$TMP_ROOT/install.err"
 
 test -f "$INSTALL_HOME/.config/goose/config.yaml"
 test -f "$INSTALL_HOME/.config/goose/recipes/autoresearch-loop.yaml"
+test -f "$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
+test -f "$ROOT_DIR/.cache/angella/control-plane/install/telemetry.jsonl"
+grep -q '"rendered_hashes"' "$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
+grep -q '"overwrite_mode": "installed_new"' "$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
 grep -q "Setup Complete" "$INSTALL_OUT"
 
 AUTO_YES_HOME="$TMP_ROOT/home-auto-yes-overwrite"
@@ -170,6 +174,9 @@ AUTO_YES_ERR="$TMP_ROOT/auto-yes-overwrite.err"
 
 grep -q 'GOOSE_MODEL: "gemma4:26b"' "$AUTO_YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_LEAD_PROVIDER: "openai"' "$AUTO_YES_HOME/.config/goose/config.yaml"
+grep -q '"drift_detected": true' "$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
+grep -q '"overwrite_mode": "auto_yes_overwrite"' "$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
+grep -q '"drift_detected": true' "$ROOT_DIR/.cache/angella/control-plane/install/telemetry.jsonl"
 
 YES_OUT="$TMP_ROOT/yes.out"
 YES_ERR="$TMP_ROOT/yes.err"

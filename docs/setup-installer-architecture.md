@@ -37,6 +37,8 @@ Responsibilities:
 - render both `autoresearch-loop` and `harness-self-optimize` recipes into Goose
 - render custom provider templates when needed
 - install rendered Goose config/recipes into `$HOME/.config/goose`
+- compare rendered hashes with preexisting Goose config/recipe hashes before overwrite
+- record install drift summary and telemetry under `.cache/angella/control-plane/install/`
 - create the control-plane layout under `.cache/angella/control-plane`
 - create local log directories
 - print runtime follow-up instructions
@@ -86,6 +88,7 @@ The resolved selection is persisted into bootstrap state and mirrored into:
 
 - Goose rendered config
 - control-plane `current-selection.json`
+- install summary hashes / drift metadata
 - future run telemetry
 
 ## Control-plane artifacts
@@ -99,10 +102,16 @@ Recipe/runtime logging now normalizes the control-plane payloads instead of writ
   - appends structured loop iteration events with normalized intent and harness metadata
 - `runs/<run_id>/summary.json`
   - records selected model ids, resolved provider/model names, env capability snapshot, benchmark history, failure causes, kept changes, and reverted changes
+- `runs/<run_id>/report.md`
+  - verification-only runs always write a human-readable markdown report with benchmark outcome and finalize skip reason
 - `failures/open/*.json`
   - stores normalized failure artifacts with `component`, `failure_type`, `reproduction`, `expected`, `observed`, `candidate_fix_area`, and `source_run_id`
 - `queue/meta-loop/*.json`
   - stores promotion reports, accepted-run finalize records, branch/export metadata, and PR bookkeeping
+- `install/summary.json`
+  - stores rendered hashes, preexisting target hashes, applied target hashes, drift detection, drift targets, and overwrite mode
+- `install/telemetry.jsonl`
+  - appends setup install events so stale config drift is visible after noninteractive runs
 
 Accepted-run finalization now does all of the following in one flow:
 
@@ -116,15 +125,26 @@ Accepted-run finalization now does all of the following in one flow:
 Read-only inspection is available through the control-plane admin tool and summarizes:
 
 - recent accepted runs
+- recent verification-only runs
 - open failures
 - pending drafts
 - recent queue artifacts
 - retention policy
 
+When `format=markdown`, inspection returns a fixed operator-facing report with:
+
+- recent accepted runs
+- recent verification-only runs
+- open failures by type
+- pending drafts by kind
+- retention / prune due soon
+
 Component-scoped guidance is also available through the control-plane admin tool:
 
 - benchmark command for each harness component
 - default acceptance checks
+- success signal
+- allowed fix surface
 - priority file list to keep live self-optimize runs from exploring the whole repo
 
 When `dry_run=true`, draft generation, promotion, branch export, and queue writes are treated as no-op previews and must not mutate tracked files or control-plane draft state.
@@ -148,6 +168,13 @@ Queue retention policy defaults:
 - prune report: 7 days
 
 Passing `max_age_days > 0` to prune overrides these defaults uniformly.
+
+## Drift policy
+
+- install compares rendered Goose config and recipe hashes with the current target files before overwrite
+- `--install-only --yes` uses deterministic overwrite and records `overwrite_mode=auto_yes_overwrite`
+- interactive install warns when drift is detected and records whether the operator overwrote or kept the existing config
+- the latest install decision is persisted in bootstrap state and mirrored into `install/summary.json`
 
 ## Wheelhouse strategy
 

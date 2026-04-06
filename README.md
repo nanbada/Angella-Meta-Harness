@@ -219,8 +219,11 @@ Control-plane runtime state:
 - `.cache/angella/control-plane/runs/<run_id>/intent.json`
 - `.cache/angella/control-plane/runs/<run_id>/telemetry.jsonl`
 - `.cache/angella/control-plane/runs/<run_id>/summary.json`
+- `.cache/angella/control-plane/runs/<run_id>/report.md`
 - `.cache/angella/control-plane/failures/open/*.json`
 - `.cache/angella/control-plane/queue/meta-loop/*.json`
+- `.cache/angella/control-plane/install/summary.json`
+- `.cache/angella/control-plane/install/telemetry.jsonl`
 
 Accepted harness meta-loop run은 다음을 자동으로 수행할 수 있습니다.
 
@@ -230,7 +233,10 @@ Accepted harness meta-loop run은 다음을 자동으로 수행할 수 있습니
 - `codex/` 브랜치 push + draft PR 생성
 - stale draft / queue artifact 정리
 - inspection tool로 recent runs / failures / drafts / queue 상태 조회
+- inspection tool을 `format=markdown` 으로 호출해 operator-facing dashboard 생성
 - component description tool로 benchmark command / acceptance checks / priority files 조회
+
+verification-only run은 `report.md` 와 `summary.json` 만 남기고 finalize/export/promotion 을 실행하지 않습니다.
 
 `dry_run=true` 경로는 preview 전용이며 draft 파일, queue entry, branch 상태를 실제로 바꾸지 않습니다.
 
@@ -239,6 +245,18 @@ Accepted export branch는 deterministic naming policy를 사용합니다.
 - prefix: `codex/meta-loop-`
 - objective와 run id slug는 길이 제한이 있다
 - 마지막에 stable hash suffix가 붙는다
+
+Accepted meta-loop export PR은 proof/reference artifact가 기본값입니다.
+
+- 첫 문단에 `Reference proof only. Not intended for merge.` 를 넣는다
+- primary structure PR은 `#6` 을 기준으로 링크한다
+- proof PR은 merge 대상이 아니라 accepted-run evidence 보존용으로 유지한다
+
+Install stage는 rendered Goose config/recipe hash를 현재 target hash와 비교합니다.
+
+- drift 정보는 bootstrap state와 `.cache/angella/control-plane/install/summary.json` 에 기록됩니다
+- `bash setup.sh --install-only --yes` 는 deterministic overwrite 를 수행합니다
+- interactive install은 drift warning 후 overwrite 여부를 기록합니다
 
 preview worker를 다시 도입할 때는 [`docs/preview-worker-reintroduction.md`](/Users/nanbada/projects/Angella/docs/preview-worker-reintroduction.md) 의 gating 전략을 따른다.
 

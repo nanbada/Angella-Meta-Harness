@@ -23,3 +23,16 @@
 - 같은 run fingerprint면 addendum을 다시 붙이지 않는다
 - 기존 list item과 동일한 bullet은 새 addendum에 중복 기록하지 않는다
 - 단순 summary 반복보다 새 signal, check, boundary가 생겼을 때만 addendum이 커지게 한다
+
+## Verification-only report quality
+
+- `runs/<run_id>/report.md` 는 사람이 바로 읽을 수 있는 markdown 형식이어야 한다
+- run id, objective component, benchmark command, metric, summary가 모두 보인다
+- finalize skip reason이 명시된다
+- export / knowledge promotion이 실행되지 않았다는 점이 분명히 드러난다
+
+## Accepted proof PR rule
+
+- accepted meta-loop export PR 첫 문단에는 `Reference proof only. Not intended for merge.` 가 들어간다
+- proof PR 본문에는 primary structure PR 링크가 들어간다
+- proof PR은 merge 대상이 아니라 accepted-run artifact 보존용이라는 점이 명확해야 한다

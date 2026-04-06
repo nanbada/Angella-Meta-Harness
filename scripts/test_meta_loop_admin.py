@@ -20,6 +20,8 @@ from meta_loop_ops import (
     export_meta_loop_change,
     finalize_accepted_meta_loop_run,
     generate_knowledge_drafts_from_run,
+    harness_component_context,
+    inspect_control_plane,
     promote_knowledge_drafts,
     record_verification_only_run,
     prune_stale_control_plane_artifacts,
@@ -78,7 +80,21 @@ def main() -> int:
         os.environ["PATH"] = env["PATH"]
         os.environ["ANGELLA_CONTROL_PLANE_DIR"] = env["ANGELLA_CONTROL_PLANE_DIR"]
 
-        repo.mkdir()
+        empty_inspection = inspect_control_plane(
+            run_limit=5,
+            failure_limit=5,
+            draft_limit=5,
+            queue_limit=5,
+            format="markdown",
+        )
+        assert empty_inspection["format"] == "markdown"
+        assert "## Recent Accepted Runs" in empty_inspection["content"]
+        assert "## Recent Verification-Only Runs" in empty_inspection["content"]
+        assert "## Open Failures By Type" in empty_inspection["content"]
+        assert "## Pending Drafts By Kind" in empty_inspection["content"]
+        assert "## Retention / Prune Due Soon" in empty_inspection["content"]
+
+        repo.mkdir(exist_ok=True)
         _run(["git", "init", "-b", "main"], cwd=repo, env=env)
         _run(["git", "config", "user.name", "Angella Test"], cwd=repo, env=env)
         _run(["git", "config", "user.email", "angella@example.com"], cwd=repo, env=env)
@@ -354,13 +370,21 @@ def main() -> int:
         assert not stale_prune_report.exists()
         assert retained_finalize.exists()
 
-        from meta_loop_ops import inspect_control_plane  # noqa: PLC0415
-
         inspection = inspect_control_plane(run_limit=5, failure_limit=5, draft_limit=5, queue_limit=5)
         assert inspection["recent_runs"]
         assert inspection["open_failures"]
         assert inspection["recent_queue"]
         assert inspection["retention_policy_days"]["drafts"] == 14
+        markdown_inspection = inspect_control_plane(
+            run_limit=5,
+            failure_limit=5,
+            draft_limit=5,
+            queue_limit=5,
+            format="markdown",
+        )
+        assert markdown_inspection["format"] == "markdown"
+        assert "## Recent Accepted Runs" in markdown_inspection["content"]
+        assert "## Recent Verification-Only Runs" in markdown_inspection["content"]
 
         verification_only = record_verification_only_run(
             run_id="verification-only-run",
@@ -375,8 +399,21 @@ def main() -> int:
         verification_summary = Path(verification_only["summary_path"])
         assert verification_summary.is_file()
         verification_payload = _read_json(verification_summary)
+        verification_report = Path(verification_only["report_path"])
+        assert verification_report.is_file()
+        assert "## Outcome" in verification_report.read_text(encoding="utf-8")
+        assert verification_payload["run_kind"] == "verification_only"
         assert verification_payload["verification_only"] is True
+        assert verification_payload["report_path"] == str(verification_report)
+        assert verification_payload["finalize_skipped_reason"]
         assert verification_payload["metric_value"] == 0.42
+
+        for component_name in ("setup-check", "profile-resolution", "recipe-runtime"):
+            component = harness_component_context(component_name)
+            assert component["benchmark_command"]
+            assert component["priority_files"]
+            assert component["success_signal"]
+            assert component["allowed_fix_surface"]
 
     print("meta loop admin tests passed")
     return 0
