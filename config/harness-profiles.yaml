@@ -1,108 +1,85 @@
 {
   "profiles": [
     {
-      "id": "default",
-      "display_name": "Default Frontier + Local Gemma4",
+      "id": "frontier_default",
+      "display_name": "Frontier Default",
       "default": true,
       "lead_selector": "best_reasoning_frontier",
       "planner_selector": "best_reasoning_frontier",
-      "worker_selector": "best_local_reasoning",
+      "worker_selector": "best_reasoning_frontier_low_cost",
+      "execution_mode": "frontier_primary",
+      "worker_tier_default": "frontier_primary",
+      "local_cache_enabled": true,
+      "token_saver_enabled": false,
       "non_goals": [
-        "Hard-code Gemini as permanent lead",
-        "Use preview worker by default",
-        "Select apfel unless explicitly needed for latency"
-      ],
-      "mlx_policy": {
-        "preferred_context_limit": 16384,
-        "sweet_spot_min": 8192,
-        "sweet_spot_max": 16384,
-        "default_num_parallel": 2,
-        "nvfp4_preferred": false
-      },
-      "capability_flags": {
-        "worker_required_flags": ["mlx_local"]
-      }
+        "Prefer local worker when a frontier worker is available",
+        "Treat local runtime as the primary path",
+        "Optimize for lowest cost before quality"
+      ]
     },
     {
-      "id": "frontier_low_cost",
-      "display_name": "Frontier Low Cost + Local Gemma4",
-      "lead_selector": "best_reasoning_frontier_low_cost",
-      "planner_selector": "best_reasoning_frontier_low_cost",
-      "worker_selector": "best_local_reasoning",
-      "non_goals": [
-        "Use the most expensive frontier model when lower-cost frontier is sufficient"
-      ],
-      "mlx_policy": {
-        "preferred_context_limit": 16384,
-        "sweet_spot_min": 8192,
-        "sweet_spot_max": 16384,
-        "default_num_parallel": 2,
-        "nvfp4_preferred": false
-      },
-      "capability_flags": {
-        "worker_required_flags": ["mlx_local"]
-      }
-    },
-    {
-      "id": "local_reasoning",
-      "display_name": "Frontier Lead + Local Reasoning Worker",
+      "id": "frontier_quality",
+      "display_name": "Frontier Quality",
       "lead_selector": "best_reasoning_frontier",
       "planner_selector": "best_reasoning_frontier",
-      "worker_selector": "best_local_reasoning",
+      "worker_selector": "best_reasoning_frontier",
+      "execution_mode": "frontier_primary",
+      "worker_tier_default": "frontier_primary",
+      "local_cache_enabled": true,
+      "token_saver_enabled": false,
       "non_goals": [
-        "Optimize for absolute lowest latency"
-      ],
-      "mlx_policy": {
-        "preferred_context_limit": 8192,
-        "sweet_spot_min": 8192,
-        "sweet_spot_max": 16384,
-        "default_num_parallel": 2,
-        "nvfp4_preferred": false
-      },
-      "capability_flags": {
-        "worker_required_flags": ["mlx_local"]
-      }
+        "Trade quality away to save cost by default"
+      ]
     },
     {
-      "id": "low_latency_apfel",
-      "display_name": "Frontier Lead + apfel Low Latency Worker",
+      "id": "frontier_cost_guarded",
+      "display_name": "Frontier Cost Guarded",
       "lead_selector": "best_reasoning_frontier_low_cost",
       "planner_selector": "best_reasoning_frontier_low_cost",
-      "worker_selector": "best_local_low_latency",
+      "worker_selector": "best_reasoning_frontier_low_cost",
+      "execution_mode": "frontier_cost_guarded",
+      "worker_tier_default": "frontier_primary",
+      "local_cache_enabled": true,
+      "token_saver_enabled": false,
       "non_goals": [
-        "Use slower local reasoning worker when immediate latency matters most"
-      ],
-      "mlx_policy": {
-        "preferred_context_limit": 8192,
-        "sweet_spot_min": 8192,
-        "sweet_spot_max": 8192,
-        "default_num_parallel": 2,
-        "nvfp4_preferred": false
-      },
-      "capability_flags": {
-        "worker_required_flags": ["low_latency"]
-      }
+        "Use a local worker to reduce cost when frontier is still available"
+      ]
     },
     {
-      "id": "preview_nvfp4",
-      "display_name": "Frontier Lead + Preview Worker",
+      "id": "frontier_private_fallback",
+      "display_name": "Frontier Private Fallback",
       "lead_selector": "best_reasoning_frontier",
       "planner_selector": "best_reasoning_frontier",
-      "worker_selector": "best_local_preview",
-      "non_goals": [
-        "Assume a preview worker exists when the catalog has no preview entry",
-        "Use preview worker on unsupported hosts"
+      "worker_selector": "best_reasoning_frontier_low_cost",
+      "fallback_worker_selector": "best_local_fallback",
+      "execution_mode": "frontier_private_fallback",
+      "worker_tier_default": "frontier_primary",
+      "local_cache_enabled": true,
+      "token_saver_enabled": false,
+      "fallback_when_any": [
+        "private_mode",
+        "token_limited",
+        "network_blocked",
+        "frontier_unreachable"
       ],
-      "mlx_policy": {
-        "preferred_context_limit": 8192,
-        "sweet_spot_min": 8192,
-        "sweet_spot_max": 16384,
-        "default_num_parallel": 2,
-        "nvfp4_preferred": true
-      },
-      "capability_flags": {
-        "worker_required_flags": ["preview", "mlx_local"]
-      }
+      "non_goals": [
+        "Stay on frontier worker when privacy or connectivity constraints explicitly require fallback"
+      ]
+    },
+    {
+      "id": "local_lab",
+      "display_name": "Local Lab",
+      "lead_selector": "best_reasoning_frontier",
+      "planner_selector": "best_reasoning_frontier",
+      "worker_selector": "best_local_fallback",
+      "execution_mode": "local_lab",
+      "worker_tier_default": "local_augment",
+      "local_cache_enabled": true,
+      "token_saver_enabled": false,
+      "non_goals": [
+        "Treat this research profile as the default operating mode"
+      ]
+
     }
   ]
 }

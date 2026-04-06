@@ -14,9 +14,14 @@ from meta_loop_ops import (
     generate_knowledge_drafts_from_run,
     harness_component_context,
     inspect_control_plane,
+    inspect_harness_knowledge,
+    lint_harness_knowledge,
     prune_stale_control_plane_artifacts,
     record_verification_only_run,
     promote_knowledge_drafts,
+    save_harness_query_page,
+    search_harness_knowledge,
+    sync_harness_knowledge,
 )
 
 
@@ -155,6 +160,69 @@ async def list_tools() -> list[types.Tool]:
                 ],
             },
         ),
+        types.Tool(
+            name="sync_harness_knowledge",
+            description="control-plane evidence를 tracked knowledge/index/log/component pages와 builtin search index로 동기화합니다.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "run_id": {"type": "string", "default": ""},
+                    "source_kind": {"type": "string", "default": "recent"},
+                    "dry_run": {"type": "boolean", "default": False},
+                    "include_backfill": {"type": "boolean", "default": True},
+                },
+            },
+        ),
+        types.Tool(
+            name="search_harness_knowledge",
+            description="tracked harness wiki와 selected docs를 builtin index로 검색합니다.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "default": 5},
+                    "provider": {"type": "string", "default": "builtin"},
+                },
+                "required": ["query"],
+            },
+        ),
+        types.Tool(
+            name="inspect_harness_knowledge",
+            description="tracked harness wiki entrypoints, component pages, search index 상태를 요약합니다.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "format": {"type": "string", "enum": ["json", "markdown"], "default": "json"},
+                },
+            },
+        ),
+        types.Tool(
+            name="lint_harness_knowledge",
+            description="tracked harness wiki의 orphan/broken/stale/schema/parity drift를 점검합니다.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dry_run": {"type": "boolean", "default": False}
+                },
+            },
+        ),
+        types.Tool(
+            name="save_harness_query_page",
+            description="질의 결과를 tracked knowledge/queries/ 아래 페이지로 저장하고 index/log/source를 갱신합니다.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "answer_summary": {"type": "string"},
+                    "cited_paths": {"type": "array", "items": {"type": "string"}, "default": []},
+                    "generated_artifacts": {"type": "array", "items": {"type": "string"}, "default": []},
+                    "save_reason": {"type": "string", "default": ""},
+                    "title": {"type": "string", "default": ""},
+                    "dry_run": {"type": "boolean", "default": False}
+                },
+                "required": ["query", "answer_summary"],
+            },
+        ),
     ]
 
 
@@ -245,6 +313,52 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 working_directory=arguments["working_directory"],
                 branch_name=arguments.get("branch_name", ""),
                 finalize_skipped_reason=arguments.get("finalize_skipped_reason", ""),
+            )
+        )
+
+    if name == "sync_harness_knowledge":
+        return text_response(
+            sync_harness_knowledge(
+                run_id=arguments.get("run_id", ""),
+                source_kind=arguments.get("source_kind", "recent"),
+                dry_run=arguments.get("dry_run", False),
+                include_backfill=arguments.get("include_backfill", True),
+            )
+        )
+
+    if name == "search_harness_knowledge":
+        return text_response(
+            search_harness_knowledge(
+                arguments["query"],
+                limit=arguments.get("limit", 5),
+                provider=arguments.get("provider", "builtin"),
+            )
+        )
+
+    if name == "inspect_harness_knowledge":
+        return text_response(
+            inspect_harness_knowledge(
+                format=arguments.get("format", "json"),
+            )
+        )
+
+    if name == "lint_harness_knowledge":
+        return text_response(
+            lint_harness_knowledge(
+                dry_run=arguments.get("dry_run", False),
+            )
+        )
+
+    if name == "save_harness_query_page":
+        return text_response(
+            save_harness_query_page(
+                query=arguments["query"],
+                answer_summary=arguments["answer_summary"],
+                cited_paths=arguments.get("cited_paths", []),
+                generated_artifacts=arguments.get("generated_artifacts", []),
+                save_reason=arguments.get("save_reason", ""),
+                title=arguments.get("title", ""),
+                dry_run=arguments.get("dry_run", False),
             )
         )
 

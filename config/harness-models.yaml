@@ -6,7 +6,7 @@
       "goose_provider": "google",
       "model": "gemini-2.5-pro",
       "display_name": "Google Gemini 2.5 Pro",
-      "role_support": ["lead", "planner"],
+      "role_support": ["lead", "planner", "worker"],
       "context_limit": 1048576,
       "temperature_default": 0.2,
       "tool_use_score": 89,
@@ -17,7 +17,8 @@
       "priority": 70,
       "requires_env": ["GOOGLE_API_KEY"],
       "availability_check": [],
-      "flags": ["vision", "json_mode", "reasoning"]
+      "flags": ["vision", "json_mode", "reasoning", "frontier", "remote"],
+      "tier": "frontier"
     },
     {
       "id": "anthropic_claude_opus_4_1",
@@ -25,7 +26,7 @@
       "goose_provider": "anthropic",
       "model": "claude-opus-4-1-20250805",
       "display_name": "Anthropic Claude Opus 4.1",
-      "role_support": ["lead", "planner"],
+      "role_support": ["lead", "planner", "worker"],
       "context_limit": 200000,
       "temperature_default": 0.2,
       "tool_use_score": 94,
@@ -36,7 +37,8 @@
       "priority": 95,
       "requires_env": ["ANTHROPIC_API_KEY"],
       "availability_check": [],
-      "flags": ["vision", "json_mode", "reasoning"]
+      "flags": ["vision", "json_mode", "reasoning", "frontier", "remote"],
+      "tier": "frontier"
     },
     {
       "id": "anthropic_claude_sonnet_4",
@@ -44,7 +46,7 @@
       "goose_provider": "anthropic",
       "model": "claude-sonnet-4-20250514",
       "display_name": "Anthropic Claude Sonnet 4",
-      "role_support": ["lead", "planner"],
+      "role_support": ["lead", "planner", "worker"],
       "context_limit": 200000,
       "temperature_default": 0.2,
       "tool_use_score": 92,
@@ -55,7 +57,8 @@
       "priority": 90,
       "requires_env": ["ANTHROPIC_API_KEY"],
       "availability_check": [],
-      "flags": ["vision", "json_mode", "reasoning"]
+      "flags": ["vision", "json_mode", "reasoning", "frontier", "remote"],
+      "tier": "frontier"
     },
     {
       "id": "openai_gpt_5_2",
@@ -63,7 +66,7 @@
       "goose_provider": "openai",
       "model": "gpt-5.2",
       "display_name": "OpenAI GPT-5.2",
-      "role_support": ["lead", "planner"],
+      "role_support": ["lead", "planner", "worker"],
       "context_limit": 400000,
       "temperature_default": 0.2,
       "tool_use_score": 94,
@@ -74,7 +77,8 @@
       "priority": 92,
       "requires_env": ["OPENAI_API_KEY"],
       "availability_check": [],
-      "flags": ["vision", "json_mode", "reasoning"]
+      "flags": ["vision", "json_mode", "reasoning", "frontier", "remote"],
+      "tier": "frontier"
     },
     {
       "id": "openai_gpt_5_2_pro",
@@ -82,7 +86,7 @@
       "goose_provider": "openai",
       "model": "gpt-5.2-pro",
       "display_name": "OpenAI GPT-5.2 Pro",
-      "role_support": ["lead", "planner"],
+      "role_support": ["lead", "planner", "worker"],
       "context_limit": 400000,
       "temperature_default": 0.2,
       "tool_use_score": 95,
@@ -93,7 +97,8 @@
       "priority": 100,
       "requires_env": ["OPENAI_API_KEY"],
       "availability_check": [],
-      "flags": ["vision", "json_mode", "reasoning"]
+      "flags": ["vision", "json_mode", "reasoning", "frontier", "remote"],
+      "tier": "frontier"
     },
     {
       "id": "ollama_gemma4_26b",
@@ -113,7 +118,8 @@
       "requires_env": [],
       "availability_check": ["ollama_model:gemma4:26b"],
       "auto_pull_on_bootstrap": true,
-      "flags": ["mlx_local", "reasoning"]
+      "flags": ["mlx_local", "reasoning", "local", "fallback", "augment", "cache"],
+      "tier": "local"
     },
     {
       "id": "apfel_foundationmodel",
@@ -133,7 +139,29 @@
       "requires_env": ["ANGELLA_APFEL_BASE_URL"],
       "availability_check": ["apfel_health"],
       "auto_pull_on_bootstrap": false,
-      "flags": ["low_latency"]
+      "flags": ["low_latency", "local", "fallback", "augment"],
+      "tier": "local"
+    },
+    {
+      "id": "mlx_gemma4_31b_it_4bit",
+      "provider": "custom",
+      "goose_provider": "angella_apfel_local",
+      "model": "mlx-community/gemma-4-31b-it-4bit",
+      "display_name": "MLX Gemma 4 31B It (4-bit)",
+      "role_support": ["worker"],
+      "context_limit": 8192,
+      "temperature_default": 0.2,
+      "tool_use_score": 85,
+      "reasoning_score": 90,
+      "latency_score": 75,
+      "cost_score": 95,
+      "stability_score": 85,
+      "priority": 85,
+      "requires_env": ["ANGELLA_APFEL_BASE_URL"],
+      "availability_check": ["apfel_health"],
+      "auto_pull_on_bootstrap": false,
+      "flags": ["mlx_local", "reasoning", "local", "fallback", "augment", "cache"],
+      "tier": "local"
     }
   ]
 }

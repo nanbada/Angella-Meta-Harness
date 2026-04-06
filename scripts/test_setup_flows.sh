@@ -105,7 +105,6 @@ CHECK_ERR="$TMP_ROOT/check.err"
 )
 
 grep -q "Template rendering checks passed" "$CHECK_OUT"
-grep -q "Model 'gemma4:26b' already pulled" "$CHECK_OUT"
 
 MODELS_OUT="$TMP_ROOT/models.out"
 (
@@ -114,15 +113,25 @@ MODELS_OUT="$TMP_ROOT/models.out"
 )
 grep -q "google_gemini_2_5_pro" "$MODELS_OUT"
 grep -q "ollama_gemma4_26b" "$MODELS_OUT"
-! grep -q "ollama_qwen25_coder_32b" "$MODELS_OUT"
+grep -q "openai_gpt_5_2_pro: roles=lead,planner,worker" "$MODELS_OUT"
 
 PROFILES_OUT="$TMP_ROOT/profiles.out"
 (
   cd "$ROOT_DIR"
   HOME="$CHECK_HOME" bash setup.sh --list-harness-profiles >"$PROFILES_OUT" 2>/dev/null
 )
-grep -q "default: .*worker=ollama_gemma4_26b" "$PROFILES_OUT"
-grep -q "preview_nvfp4: disabled" "$PROFILES_OUT"
+grep -q "frontier_default: .*worker=openai_gpt_5_2" "$PROFILES_OUT"
+grep -q "local_lab: .*worker=ollama_gemma4_26b" "$PROFILES_OUT"
+
+LEGACY_PROFILE_ERR="$TMP_ROOT/legacy-profile.err"
+if (
+  cd "$ROOT_DIR"
+  HOME="$CHECK_HOME" bash setup.sh --check --harness-profile default >/dev/null 2>"$LEGACY_PROFILE_ERR"
+); then
+  echo "legacy profile unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -q 'Legacy harness profile `default` has been removed' "$LEGACY_PROFILE_ERR"
 
 BOOTSTRAP_OUT="$TMP_ROOT/bootstrap.out"
 BOOTSTRAP_ERR="$TMP_ROOT/bootstrap.err"
@@ -134,7 +143,8 @@ BOOTSTRAP_ERR="$TMP_ROOT/bootstrap.err"
 
 test -f "$ROOT_DIR/.cache/angella/bootstrap.env"
 test -f "$ROOT_DIR/.cache/angella/bootstrap-venv/bin/python"
-grep -q "ANGELLA_HARNESS_PROFILE_ID=.*default" "$ROOT_DIR/.cache/angella/bootstrap.env"
+grep -q "ANGELLA_HARNESS_PROFILE_ID=.*frontier_default" "$ROOT_DIR/.cache/angella/bootstrap.env"
+grep -q "ANGELLA_EXECUTION_MODE=.*frontier_primary" "$ROOT_DIR/.cache/angella/bootstrap.env"
 grep -q "Bootstrap Complete" "$BOOTSTRAP_OUT"
 
 INSTALL_OUT="$TMP_ROOT/install.out"
@@ -156,7 +166,7 @@ grep -q "Setup Complete" "$INSTALL_OUT"
 AUTO_YES_HOME="$TMP_ROOT/home-auto-yes-overwrite"
 mkdir -p "$AUTO_YES_HOME/.config/goose/recipes"
 cat >"$AUTO_YES_HOME/.config/goose/config.yaml" <<'EOF'
-GOOSE_PROVIDER: "ollama"
+GOOSE_PROVIDER: "openai"
 GOOSE_MODEL: "stale-model"
 EOF
 
@@ -169,11 +179,12 @@ AUTO_YES_ERR="$TMP_ROOT/auto-yes-overwrite.err"
     --yes \
     --lead-model openai_gpt_5_2_pro \
     --planner-model openai_gpt_5_2_pro \
-    --worker-model ollama_gemma4_26b >"$AUTO_YES_OUT" 2>"$AUTO_YES_ERR"
+    --worker-model openai_gpt_5_2 >"$AUTO_YES_OUT" 2>"$AUTO_YES_ERR"
 )
 
-grep -q 'GOOSE_MODEL: "gemma4:26b"' "$AUTO_YES_HOME/.config/goose/config.yaml"
+grep -q 'GOOSE_MODEL: "gpt-5.2"' "$AUTO_YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_LEAD_PROVIDER: "openai"' "$AUTO_YES_HOME/.config/goose/config.yaml"
+grep -q 'ANGELLA_EXECUTION_MODE: "frontier_primary"' "$AUTO_YES_HOME/.config/goose/config.yaml"
 grep -q '"drift_detected": true' "$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
 grep -q '"overwrite_mode": "auto_yes_overwrite"' "$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
 grep -q '"drift_detected": true' "$ROOT_DIR/.cache/angella/control-plane/install/telemetry.jsonl"
@@ -184,10 +195,10 @@ YES_ERR="$TMP_ROOT/yes.err"
 (
   cd "$ROOT_DIR"
   HOME="$YES_HOME" bash setup.sh \
-    --harness-profile default \
+    --harness-profile frontier_default \
     --lead-model openai_gpt_5_2_pro \
     --planner-model anthropic_claude_sonnet_4 \
-    --worker-model ollama_gemma4_26b \
+    --worker-model openai_gpt_5_2 \
     --yes >"$YES_OUT" 2>"$YES_ERR"
 )
 
@@ -201,13 +212,18 @@ grep -q 'GOOSE_LEAD_PROVIDER: "openai"' "$YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_LEAD_MODEL: "gpt-5.2-pro"' "$YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_PLANNER_PROVIDER: "anthropic"' "$YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_PLANNER_MODEL: "claude-sonnet-4-20250514"' "$YES_HOME/.config/goose/config.yaml"
-grep -q 'GOOSE_PROVIDER: "ollama"' "$YES_HOME/.config/goose/config.yaml"
-grep -q 'GOOSE_MODEL: "gemma4:26b"' "$YES_HOME/.config/goose/config.yaml"
+grep -q 'GOOSE_PROVIDER: "openai"' "$YES_HOME/.config/goose/config.yaml"
+grep -q 'GOOSE_MODEL: "gpt-5.2"' "$YES_HOME/.config/goose/config.yaml"
+grep -q 'ANGELLA_EXECUTION_MODE: "frontier_primary"' "$YES_HOME/.config/goose/config.yaml"
+grep -q 'ANGELLA_WORKER_TIER: "frontier_primary"' "$YES_HOME/.config/goose/config.yaml"
 grep -q 'lead: openai/gpt-5.2-pro' "$YES_OUT"
 grep -q 'planner: anthropic/claude-sonnet-4-20250514' "$YES_OUT"
-grep -q 'worker: ollama/gemma4:26b' "$YES_OUT"
+grep -q 'worker: openai/gpt-5.2' "$YES_OUT"
+grep -q 'mode: frontier_primary' "$YES_OUT"
 test -d "$ROOT_DIR/logs/Goose Logs"
 test -f "$ROOT_DIR/.cache/angella/control-plane/current-selection.json"
+grep -q '"execution_mode": "frontier_primary"' "$ROOT_DIR/.cache/angella/control-plane/current-selection.json"
+grep -q '"worker_tier": "frontier_primary"' "$ROOT_DIR/.cache/angella/control-plane/current-selection.json"
 
 if command -v rg >/dev/null 2>&1; then
   ! rg -q '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__|__RENDERED_HARNESS_SELF_OPTIMIZE_PATH__' "$YES_HOME/.config/goose"
@@ -219,7 +235,13 @@ grep -q "Goose config installed to" "$YES_OUT"
 grep -q "Rendered recipe installed to" "$YES_OUT"
 
 python3 "$ROOT_DIR/scripts/test_control_plane_logging.py"
+python3 "$ROOT_DIR/scripts/test_frontier_harness_reset.py"
 python3 "$ROOT_DIR/scripts/test_meta_loop_admin.py"
 python3 "$ROOT_DIR/scripts/test_harness_self_optimize_adapter.py"
+python3 "$ROOT_DIR/scripts/test_harness_knowledge.py"
+python3 "$ROOT_DIR/scripts/test_harness_parity_diff.py"
+python3 "$ROOT_DIR/scripts/test_optional_providers.py"
+python3 "$ROOT_DIR/scripts/validate_harness_schema.py"
+python3 "$ROOT_DIR/scripts/run_harness_parity_diff.py"
 
 echo "setup flow tests passed"

@@ -22,9 +22,12 @@ from meta_loop_ops import (
     generate_knowledge_drafts_from_run,
     harness_component_context,
     inspect_control_plane,
+    inspect_harness_knowledge,
     promote_knowledge_drafts,
     record_verification_only_run,
     prune_stale_control_plane_artifacts,
+    search_harness_knowledge,
+    sync_harness_knowledge,
 )  # noqa: E402
 
 
@@ -101,6 +104,12 @@ def main() -> int:
 
         (repo / "knowledge" / "sops").mkdir(parents=True)
         (repo / "knowledge" / "skills").mkdir(parents=True)
+        (repo / "knowledge" / "schema.md").write_text("# Schema\n", encoding="utf-8")
+        (repo / "PARITY.md").write_text(
+            "# Parity Status — Temp Repo\n\n- Canonical document: `scripts/run_harness_parity_diff.py`\n",
+            encoding="utf-8",
+        )
+        (repo / ".gitignore").write_text(".cache/\n", encoding="utf-8")
         (repo / "README.md").write_text("# Temp Repo\n", encoding="utf-8")
         (repo / "knowledge" / "sops" / "failure-threshold-not-met.md").write_text(
             "# Existing SOP\n\n- keep original guidance\n",
@@ -111,6 +120,7 @@ def main() -> int:
             encoding="utf-8",
         )
         _run(["git", "add", "README.md"], cwd=repo, env=env)
+        _run(["git", "add", ".gitignore"], cwd=repo, env=env)
         _run(["git", "add", "knowledge/sops/failure-threshold-not-met.md"], cwd=repo, env=env)
         _run(["git", "add", "knowledge/skills/worker-ollama-gemma4-26b.md"], cwd=repo, env=env)
         _run(["git", "commit", "-m", "init"], cwd=repo, env=env)
@@ -256,6 +266,7 @@ def main() -> int:
         assert result["export"]["pr_url"] == "https://example.com/pr/123"
         assert Path(result["finalize_path"]).is_file()
         assert result["failure_closure"]["closed"]
+        assert result["knowledge_sync"]["indexed_document_count"] >= 4
         closed_failure = result["failure_closure"]["closed"][0]
         assert closed_failure["failure_type"] == "threshold_not_met"
         assert not closure_candidate.exists()
@@ -264,8 +275,33 @@ def main() -> int:
         assert summary_payload["export"]["pr_url"] == "https://example.com/pr/123"
         assert summary_payload["promotion"]["promoted"]
         assert summary_payload["failure_closure"]["closed"]
+        assert summary_payload["knowledge_sync"]["updated_paths"]
         assert "Meta-loop export: branch=" in summary_payload["summary"]
         assert sop_content.count("Accepted Run Addendum - `angella-meta-run`") == 1
+        assert _run(["git", "status", "--short", "--untracked-files=no"], cwd=repo, env=env) == ""
+        assert (repo / "knowledge" / "index.md").is_file()
+        assert (repo / "knowledge" / "log.md").is_file()
+        assert (repo / "knowledge" / "components" / "setup-check.md").is_file()
+
+        explicit_backfill_markdown = control_plane / "knowledge" / "sops" / "failure-explicit-backfill.md"
+        explicit_backfill_markdown.parent.mkdir(parents=True, exist_ok=True)
+        explicit_backfill_markdown.write_text("# Failure Pattern: explicit_backfill\n\n- from admin sync\n", encoding="utf-8")
+        _write_json(
+            control_plane / "knowledge" / "sops" / "failure-explicit-backfill.md.meta.json",
+            {
+                "status": "promoted",
+                "target_relpath": "knowledge/sops/failure-explicit-backfill.md",
+            },
+        )
+        sync_snapshot = sync_harness_knowledge(repo_root=repo)
+        assert sync_snapshot["indexed_document_count"] >= 4
+        assert sync_snapshot["include_backfill"] is True
+        assert (repo / "knowledge" / "sops" / "failure-explicit-backfill.md").is_file()
+        search_payload = search_harness_knowledge("setup-check retries", repo_root=repo)
+        assert search_payload["success"] is True
+        assert search_payload["results"]
+        knowledge_markdown = inspect_harness_knowledge(format="markdown", repo_root=repo)
+        assert "## Components" in knowledge_markdown["content"]
 
         current_branch = _run(["git", "branch", "--show-current"], cwd=repo, env=env)
         assert current_branch.startswith("codex/")
@@ -401,6 +437,17 @@ def main() -> int:
         assert "## Recent Accepted Runs" in markdown_inspection["content"]
         assert "## Recent Verification-Only Runs" in markdown_inspection["content"]
 
+        scoped_backfill_markdown = control_plane / "knowledge" / "sops" / "failure-scoped-sync.md"
+        scoped_backfill_markdown.parent.mkdir(parents=True, exist_ok=True)
+        scoped_backfill_markdown.write_text("# Failure Pattern: scoped_sync\n\n- should stay out of verification-only sync\n", encoding="utf-8")
+        _write_json(
+            control_plane / "knowledge" / "sops" / "failure-scoped-sync.md.meta.json",
+            {
+                "status": "promoted",
+                "target_relpath": "knowledge/sops/failure-scoped-sync.md",
+            },
+        )
+
         verification_only = record_verification_only_run(
             run_id="verification-only-run",
             objective_component="recipe-runtime",
@@ -410,6 +457,7 @@ def main() -> int:
             summary="Verification-only benchmark passed without a code patch.",
             working_directory=str(repo),
             branch_name="angella/run-verification-only",
+            repo_root=repo,
         )
         verification_summary = Path(verification_only["summary_path"])
         assert verification_summary.is_file()
@@ -424,6 +472,10 @@ def main() -> int:
         assert verification_payload["metric_value"] == 0.42
         assert verification_payload["objective_component"] == "recipe-runtime"
         assert verification_payload["harness_metadata"]["objective_component"] == "recipe-runtime"
+        assert verification_payload["knowledge_sync"]["updated_paths"]
+        assert verification_payload["knowledge_sync"]["include_backfill"] is False
+        assert verification_payload["compaction"]["summary"]["raw_chars"] >= verification_payload["compaction"]["summary"]["compact_chars"]
+        assert not (repo / "knowledge" / "sops" / "failure-scoped-sync.md").exists()
 
         _write_json(
             control_plane / "runs" / "verification-updated-run" / "summary.json",
@@ -442,10 +494,12 @@ def main() -> int:
             summary="Verification-only setup check passed after reread.",
             working_directory=str(repo),
             branch_name="angella/run-verification-update",
+            repo_root=repo,
         )
         updated_payload = _read_json(Path(verification_updated["summary_path"]))
         assert updated_payload["objective_component"] == "setup-check"
         assert updated_payload["harness_metadata"]["objective_component"] == "setup-check"
+        assert updated_payload["knowledge_sync"]["updated_paths"]
 
         updated_inspection = inspect_control_plane(
             run_limit=10,
@@ -455,6 +509,8 @@ def main() -> int:
             format="markdown",
         )
         assert "(`setup-check`)" in updated_inspection["content"]
+        tracked_knowledge = inspect_harness_knowledge(format="markdown", repo_root=repo)
+        assert "knowledge/index.md" in tracked_knowledge["content"]
 
         for component_name in ("setup-check", "profile-resolution", "recipe-runtime"):
             component = harness_component_context(component_name)

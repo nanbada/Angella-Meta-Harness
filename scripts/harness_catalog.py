@@ -6,7 +6,6 @@ import json
 import os
 import shlex
 import sys
-import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -14,10 +13,22 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MODELS_PATH = ROOT_DIR / "config" / "harness-models.yaml"
 PROFILES_PATH = ROOT_DIR / "config" / "harness-profiles.yaml"
+LEGACY_PROFILE_MIGRATIONS = {
+    "default": "frontier_default",
+    "frontier_low_cost": "frontier_cost_guarded",
+    "local_reasoning": "local_lab",
+    "low_latency_apfel": "local_lab",
+    "preview_nvfp4": "local_lab",
+}
+FRONTIER_PROVIDERS = {"google", "anthropic", "openai"}
 
 
 def load_json_yaml(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _bool_env(name: str) -> bool:
+    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def ollama_tags() -> dict:
@@ -120,18 +131,11 @@ def selector_sort_key(selector: str, model: dict):
             model["stability_score"],
             model["priority"],
         )
-    if selector == "best_local_preview":
+    if selector == "best_local_fallback":
         return (
             model["reasoning_score"],
-            model["tool_use_score"],
             model["stability_score"],
-            model["priority"],
-        )
-    if selector == "best_local_reasoning":
-        return (
-            model["reasoning_score"],
-            model["latency_score"],
-            model["stability_score"],
+            model["cost_score"],
             model["priority"],
         )
     return (
@@ -144,9 +148,11 @@ def selector_sort_key(selector: str, model: dict):
 
 def selector_candidates(selector: str, models: list[dict], role: str) -> list[dict]:
     if selector.startswith("best_reasoning_frontier"):
-        return [m for m in models if role in m["role_support"] and m["provider"] in {"google", "anthropic", "openai"}]
-    if selector == "best_local_preview":
-        return [m for m in models if role in m["role_support"] and "preview" in m.get("flags", [])]
+        return [m for m in models if role in m["role_support"] and m["provider"] in FRONTIER_PROVIDERS]
+    if selector == "best_local_low_latency":
+        return [m for m in models if role in m["role_support"] and "low_latency" in m.get("flags", [])]
+    if selector == "best_local_fallback":
+        return [m for m in models if role in m["role_support"] and m.get("tier") == "local"]
     return [m for m in models if role in m["role_support"]]
 
 
@@ -187,10 +193,56 @@ def get_default_profile(profiles: list[dict]) -> dict:
     return profiles[0]
 
 
-def resolve_selection(resolved_models: list[dict], profiles: list[dict], profile_id: str | None, lead_override: str | None, planner_override: str | None, worker_override: str | None) -> dict:
+def _legacy_profile_error(profile_id: str) -> SystemExit:
+    replacement = LEGACY_PROFILE_MIGRATIONS.get(profile_id)
+    if replacement:
+        return SystemExit(
+            f"Legacy harness profile `{profile_id}` has been removed. Use `{replacement}` instead."
+        )
+    return SystemExit(f"Unknown harness profile: {profile_id}")
+
+
+def _frontier_reachable(resolved_models: list[dict], role: str) -> bool:
+    return any(
+        role in model["role_support"] and model["provider"] in FRONTIER_PROVIDERS and model["enabled"]
+        for model in resolved_models
+    )
+
+
+def _fallback_reason(profile: dict, resolved_models: list[dict]) -> str:
+    active: list[str] = []
+    if _bool_env("ANGELLA_PRIVATE_MODE"):
+        active.append("private_mode")
+    if _bool_env("ANGELLA_FRONTIER_TOKEN_LIMITED"):
+        active.append("token_limited")
+    if _bool_env("ANGELLA_FRONTIER_NETWORK_BLOCKED"):
+        active.append("network_blocked")
+    frontier_reachable_env = os.environ.get("ANGELLA_FRONTIER_REACHABLE", "").strip().lower()
+    if frontier_reachable_env in {"0", "false", "no", "off"}:
+        active.append("frontier_unreachable")
+    elif not _frontier_reachable(resolved_models, "worker"):
+        active.append("frontier_unreachable")
+
+    for reason in profile.get("fallback_when_any", []):
+        if reason in active:
+            return reason
+    return ""
+
+
+def resolve_selection(
+    resolved_models: list[dict],
+    profiles: list[dict],
+    profile_id: str | None,
+    lead_override: str | None,
+    planner_override: str | None,
+    worker_override: str | None,
+) -> dict:
+    if profile_id in LEGACY_PROFILE_MIGRATIONS:
+        raise _legacy_profile_error(profile_id or "")
+
     profile = get_profile_map(profiles).get(profile_id) if profile_id else get_default_profile(profiles)
     if profile is None:
-        raise SystemExit(f"Unknown harness profile: {profile_id}")
+        raise _legacy_profile_error(profile_id or "")
 
     by_id = {model["id"]: model for model in resolved_models}
 
@@ -215,7 +267,29 @@ def resolve_selection(resolved_models: list[dict], profiles: list[dict], profile
 
     lead = select("lead", profile["lead_selector"], lead_override)
     planner = select("planner", profile["planner_selector"], planner_override) if planner_override or profile.get("planner_selector") else lead
-    worker = select("worker", profile["worker_selector"], worker_override)
+
+    fallback_reason = ""
+    worker_selector = profile["worker_selector"]
+    if worker_override:
+        worker = select("worker", worker_selector, worker_override)
+    else:
+        fallback_reason = _fallback_reason(profile, resolved_models)
+        if fallback_reason and profile.get("fallback_worker_selector"):
+            worker_selector = profile["fallback_worker_selector"]
+        worker = select("worker", worker_selector, None)
+
+    worker_tier = profile.get("worker_tier_default", "frontier_primary")
+    if worker.get("tier") == "local":
+        if profile["id"] == "frontier_private_fallback":
+            worker_tier = "local_fallback"
+        elif profile["id"] == "local_lab":
+            worker_tier = "local_augment"
+        else:
+            worker_tier = "local_cache"
+
+    frontier_reachable = _frontier_reachable(resolved_models, "worker") and not _bool_env("ANGELLA_FRONTIER_NETWORK_BLOCKED")
+    local_cache_enabled = bool(profile.get("local_cache_enabled", False))
+    token_saver_enabled = bool(profile.get("token_saver_enabled", False))
 
     return {
         "profile": profile,
@@ -226,6 +300,14 @@ def resolve_selection(resolved_models: list[dict], profiles: list[dict], profile
             "apfel_enabled": worker["id"] == "apfel_foundationmodel",
             "mlx_preview_enabled": "preview" in worker.get("flags", []),
             "nvfp4_enabled": "preview" in worker.get("flags", []),
+        },
+        "routing": {
+            "execution_mode": profile.get("execution_mode", "frontier_primary"),
+            "worker_tier": worker_tier,
+            "fallback_reason": fallback_reason,
+            "frontier_reachable": frontier_reachable,
+            "local_cache_enabled": local_cache_enabled,
+            "token_saver_enabled": token_saver_enabled,
         },
     }
 
@@ -240,7 +322,7 @@ def print_list_models(resolved_models: list[dict]) -> None:
 
         print(
             f"{model['id']}: roles={','.join(model['role_support'])} "
-            f"provider={model['goose_provider']} model={model['model']} status={status}"
+            f"provider={model['goose_provider']} model={model['model']} tier={model.get('tier', 'unknown')} status={status}"
         )
 
 
@@ -250,7 +332,8 @@ def print_list_profiles(resolved_models: list[dict], profiles: list[dict]) -> No
             resolved = resolve_selection(resolved_models, profiles, profile["id"], None, None, None)
             print(
                 f"{profile['id']}: lead={resolved['lead']['id']} "
-                f"planner={resolved['planner']['id']} worker={resolved['worker']['id']}"
+                f"planner={resolved['planner']['id']} worker={resolved['worker']['id']} "
+                f"mode={resolved['routing']['execution_mode']} worker_tier={resolved['routing']['worker_tier']}"
             )
         except SystemExit as error:
             print(f"{profile['id']}: disabled ({error})")
@@ -266,6 +349,7 @@ def print_shell_resolution(resolution: dict) -> None:
     planner = resolution["planner"]
     worker = resolution["worker"]
     capabilities = resolution["capabilities"]
+    routing = resolution["routing"]
 
     values = {
         "ANGELLA_HARNESS_PROFILE_ID": profile["id"],
@@ -287,6 +371,12 @@ def print_shell_resolution(resolution: dict) -> None:
         "ANGELLA_MLX_PREVIEW_ENABLED": "true" if capabilities["mlx_preview_enabled"] else "false",
         "ANGELLA_NVFP4_ENABLED": "true" if capabilities["nvfp4_enabled"] else "false",
         "ANGELLA_APFEL_ENABLED": "true" if capabilities["apfel_enabled"] else "false",
+        "ANGELLA_EXECUTION_MODE": routing["execution_mode"],
+        "ANGELLA_WORKER_TIER": routing["worker_tier"],
+        "ANGELLA_FALLBACK_REASON": routing["fallback_reason"],
+        "ANGELLA_FRONTIER_REACHABLE": "true" if routing["frontier_reachable"] else "false",
+        "ANGELLA_LOCAL_CACHE_ENABLED": "true" if routing["local_cache_enabled"] else "false",
+        "ANGELLA_TOKEN_SAVER_ENABLED": "true" if routing["token_saver_enabled"] else "false",
         "ANGELLA_NON_GOALS_JSON": json.dumps(profile.get("non_goals", []), ensure_ascii=False),
         "ANGELLA_MLX_POLICY_JSON": json.dumps(profile.get("mlx_policy", {}), ensure_ascii=False),
     }

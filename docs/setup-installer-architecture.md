@@ -19,9 +19,9 @@ This document describes the current structural design of the Angella installer.
 Handled by [`scripts/setup-bootstrap.sh`](/Users/nanbada/projects/Angella/scripts/setup-bootstrap.sh).
 
 Responsibilities:
-- runtime tool checks (`brew`, `goose`, `ollama`)
+- runtime tool checks (`brew`, `goose`, local fallback runtimes when selected)
 - harness catalog/profile resolution
-- Ollama server/model validation for the selected worker
+- frontier-first worker selection and local fallback/cache metadata resolution
 - base Python detection
 - reusable bootstrap environment creation under `.cache/angella/bootstrap-venv`
 - bootstrap state persistence
@@ -81,8 +81,9 @@ The harness catalog is stored in:
 `scripts/harness_catalog.py` resolves:
 - which lead model to use
 - which planner model to use
-- which local worker to use
-- whether preview/apfel capabilities are actually enabled
+- which worker to use in frontier-first mode
+- whether a local fallback/cache path is active
+- execution mode, worker tier, fallback reason, and token-saver state
 
 The resolved selection is persisted into bootstrap state and mirrored into:
 
@@ -90,6 +91,7 @@ The resolved selection is persisted into bootstrap state and mirrored into:
 - control-plane `current-selection.json`
 - install summary hashes / drift metadata
 - future run telemetry
+- frontier routing metadata for worker tier and fallback reasons
 
 ## Control-plane artifacts
 
@@ -108,6 +110,12 @@ Recipe/runtime logging now normalizes the control-plane payloads instead of writ
   - stores normalized failure artifacts with `component`, `failure_type`, `reproduction`, `expected`, `observed`, `candidate_fix_area`, and `source_run_id`
 - `queue/meta-loop/*.json`
   - stores promotion reports, accepted-run finalize records, branch/export metadata, and PR bookkeeping
+- `wiki-index.sqlite`
+  - stores the builtin SQLite search index for tracked wiki pages and selected docs
+- `knowledge-sync.json`
+  - stores the latest tracked wiki sync result, updated files, indexed document count, and provider
+- `parity-state.json`
+  - stores machine-readable lane state, failure reason, and recovery hint for parity audits
 - `install/summary.json`
   - stores rendered hashes, preexisting target hashes, applied target hashes, drift detection, drift targets, and overwrite mode
 - `install/telemetry.jsonl`
@@ -120,8 +128,18 @@ Accepted-run finalization now does all of the following in one flow:
 - merge into an existing tracked knowledge file by appending a run-scoped addendum instead of skipping immediately
 - dedupe repeated addendum content by fingerprint and repeated bullet lines
 - close matching `failures/open/*.json` artifacts for the accepted run by moving them into `failures/closed/`
+- sync tracked `knowledge/index.md`, `knowledge/log.md`, and `knowledge/components/*.md`
+- sync tracked `knowledge/sources/*.md` and `knowledge/queries/*.md`
+- rebuild the builtin SQLite wiki index
 - annotate `summary.json` with promotion/export/finalization metadata
 - prune stale draft and queue artifacts through the control-plane admin tool
+
+Verification-only recording now also does all of the following:
+
+- keep `objective_component` in `summary.json`
+- sync tracked component/index/log pages without triggering draft promotion or export
+- attach heuristic compaction telemetry for summary/report text
+- avoid unrelated historical backfill while still updating scoped component/index/log pages
 
 Read-only inspection is available through the control-plane admin tool and summarizes:
 
@@ -131,6 +149,19 @@ Read-only inspection is available through the control-plane admin tool and summa
 - pending drafts
 - recent queue artifacts
 - retention policy
+
+Tracked knowledge inspection is also available through the control-plane admin tool:
+
+- entrypoint files
+- component page count
+- recent wiki log entries
+- builtin search index status
+- source and query page counts
+
+Additional tracked knowledge admin tools are available:
+
+- `lint_harness_knowledge`
+- `save_harness_query_page`
 
 When `format=markdown`, inspection returns a fixed operator-facing report with:
 
@@ -152,6 +183,7 @@ The self-optimize recipe should also read matching tracked knowledge before broa
 
 - related `knowledge/sops/` entries for repeated failure types
 - related `knowledge/skills/` entries for the currently selected worker model
+- search results returned by `search_harness_knowledge`
 
 When `dry_run=true`, draft generation, promotion, branch export, and queue writes are treated as no-op previews and must not mutate tracked files or control-plane draft state.
 
@@ -174,6 +206,36 @@ Queue retention policy defaults:
 - prune report: 7 days
 
 Passing `max_age_days > 0` to prune overrides these defaults uniformly.
+
+## Knowledge Policy
+
+Tracked harness wiki behavior is configured in:
+
+- [`config/knowledge-policy.yaml`](/Users/nanbada/projects/Angella/config/knowledge-policy.yaml)
+
+The first implementation uses:
+
+- tracked markdown wiki under `knowledge/**`
+- selected markdown docs under `docs/**`
+- builtin SQLite FTS search
+- no mandatory external `qmd` dependency
+- optional `qmd` provider when explicitly selected and installed
+
+## Parity Contract
+
+Behavioral product truth is tracked separately from handoff notes:
+
+- [`PARITY.md`](/Users/nanbada/projects/Angella/PARITY.md)
+- [`scripts/harness_parity_scenarios.json`](/Users/nanbada/projects/Angella/scripts/harness_parity_scenarios.json)
+- [`scripts/run_harness_parity_diff.py`](/Users/nanbada/projects/Angella/scripts/run_harness_parity_diff.py)
+
+CI and local regression paths should fail when `PARITY.md` and the scenario map drift.
+
+Parity failure handling now also writes:
+
+- control-plane parity state
+- lane-scoped failure artifacts under `failures/open/`
+- recovery hints derived from tracked harness knowledge search
 
 ## Drift policy
 
@@ -198,3 +260,10 @@ If `vendor/wheels` contains wheels, setup prefers them as an install source befo
 - relocating the bootstrap env outside the repo when desired
 - optional fully offline install mode using a complete wheelhouse
 - richer merge/update strategy when a promoted draft targets an existing tracked knowledge file
+
+## Harness Wiki V2 Candidates
+
+- optional `qmd` provider behind the existing `search_harness_knowledge` tool schema instead of replacing the builtin SQLite path
+- broader compaction coverage for benchmark stdout/stderr payloads, search snippets, and test output summaries while keeping billing truth out of scope
+- policy split for when generated wiki files should be auto-exported, handoff-only, or operator-confirmed before PR packaging
+- stronger component/entity schema if the wiki grows beyond the current harness-internal scope

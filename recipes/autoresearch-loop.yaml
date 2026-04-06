@@ -2,7 +2,7 @@ version: "1.0.0"
 title: "M3 Autoresearch Self-Optimize Loop"
 description: |
   Karpathy Autoresearch 스타일 ratchet loop + Intent-Based Engineering.
-  공식 v1 경로는 selected lead/planner + selected local worker + generic benchmark MCP + logger MCP입니다.
+  공식 v1 경로는 selected frontier-first harness + generic benchmark MCP + logger MCP입니다.
   Angella harness catalog와 profile selector가 resolved한 모델 조합 위에서 이 recipe가 실행됩니다.
 
 # setup.sh가 이 템플릿을 현재 설치 경로에 맞게 렌더링합니다.
@@ -61,7 +61,7 @@ extensions:
     description: "run-scoped loop 로그와 final report 저장"
 
 instructions: |
-  당신은 M3 36GB MLX 환경에서 동작하는 Angella Autoresearch 에이전트입니다.
+  당신은 frontier-first personal agent harness 위에서 동작하는 Angella Autoresearch 에이전트입니다.
   이 workflow의 핵심은 모델 수가 아니라 명확한 intent contract, 엄격한 preflight, 공통 benchmark schema, run-scoped transparency입니다.
 
   ## 대상 프로젝트
@@ -73,6 +73,7 @@ instructions: |
   ## 공식 v1 운영 원칙
   - 이 recipe만 공식 기본 flow입니다.
   - selected harness profile과 lead/planner/worker metadata를 항상 함께 기록합니다.
+  - 기본 경로는 frontier-first 입니다. local LLM은 fallback, augment, cache 계층으로만 취급합니다.
   - 대상 프로젝트는 반드시 Git 저장소여야 합니다.
   - tracked 변경과 untracked 파일을 포함해 worktree가 깨끗하지 않으면 즉시 중단합니다.
   - 사용자의 현재 브랜치에서 직접 작업하지 않습니다.

@@ -1,0 +1,125 @@
+{
+  "lanes": [
+    {
+      "id": 1,
+      "title": "setup check clean exit",
+      "status": "implemented",
+      "evidence": [
+        "scripts/test_setup_flows.sh",
+        "docs/current-harness-status.md"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "install-only drift overwrite",
+      "status": "implemented",
+      "evidence": [
+        "scripts/test_setup_flows.sh",
+        "docs/setup-installer-architecture.md"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "frontier-first profile resolution",
+      "status": "implemented",
+      "evidence": [
+        "scripts/harness_catalog.py",
+        "scripts/test_harness_self_optimize_adapter.py",
+        "scripts/test_frontier_harness_reset.py"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "harness self-optimize verification-only",
+      "status": "implemented",
+      "evidence": [
+        "recipes/harness-self-optimize.yaml",
+        "mcp-servers/meta_loop_ops.py",
+        "scripts/test_meta_loop_admin.py"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "finalize accepted run with promotion/export/failure closure",
+      "status": "implemented",
+      "evidence": [
+        "mcp-servers/meta_loop_ops.py",
+        "scripts/test_meta_loop_admin.py"
+      ]
+    },
+    {
+      "id": 6,
+      "title": "accepted finalize pre-export wiki sync",
+      "status": "implemented",
+      "evidence": [
+        "mcp-servers/meta_loop_ops.py",
+        "scripts/test_meta_loop_admin.py"
+      ]
+    },
+    {
+      "id": 7,
+      "title": "verification-only scoped wiki sync",
+      "status": "implemented",
+      "evidence": [
+        "mcp-servers/meta_loop_ops.py",
+        "scripts/test_meta_loop_admin.py"
+      ]
+    },
+    {
+      "id": 8,
+      "title": "admin sync backfill policy",
+      "status": "implemented",
+      "evidence": [
+        "config/knowledge-policy.yaml",
+        "knowledge/index.md",
+        "knowledge/log.md",
+        "scripts/test_harness_knowledge.py"
+      ]
+    },
+    {
+      "id": 9,
+      "title": "builtin search retrieval path",
+      "status": "implemented",
+      "evidence": [
+        "mcp-servers/meta_loop_ops.py",
+        "scripts/test_harness_knowledge.py"
+      ]
+    },
+    {
+      "id": 10,
+      "title": "output compaction path",
+      "status": "implemented",
+      "evidence": [
+        "mcp-servers/output_compactor.py",
+        "scripts/test_harness_knowledge.py"
+      ]
+    },
+    {
+      "id": 11,
+      "title": "knowledge lint path",
+      "status": "implemented",
+      "evidence": [
+        "scripts/validate_harness_schema.py",
+        "scripts/test_harness_knowledge.py"
+      ]
+    },
+    {
+      "id": 12,
+      "title": "raw source registration path",
+      "status": "implemented",
+      "evidence": [
+        "knowledge/sources/index.md",
+        "scripts/test_harness_knowledge.py"
+      ]
+    },
+    {
+      "id": 13,
+      "title": "query writeback path",
+      "status": "implemented",
+      "evidence": [
+        "mcp-servers/meta_loop_ops.py",
+        "scripts/test_harness_knowledge.py"
+      ]
+    }
+  ]
+}

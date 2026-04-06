@@ -8,6 +8,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import sqlite3
 import subprocess
 import time
 from pathlib import Path
@@ -15,11 +17,14 @@ from string import Template
 from typing import Any
 
 from control_plane import append_jsonl, ensure_control_plane_layout, run_dir, safe_run_id
+from output_compactor import compact_output, telemetry_block
 
 
 ANGELLA_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_LOG_ROOT = ANGELLA_ROOT / "logs" / "Goose Logs"
 META_LOOP_PR_TEMPLATE_PATH = ANGELLA_ROOT / "templates" / "meta-loop-pr.md.tmpl"
+KNOWLEDGE_POLICY_PATH = ANGELLA_ROOT / "config" / "knowledge-policy.yaml"
+PARITY_PATH = ANGELLA_ROOT / "PARITY.md"
 BOOTSTRAP_PYTHON = ANGELLA_ROOT / ".cache" / "angella" / "bootstrap-venv" / "bin" / "python"
 BRANCH_PREFIX = "codex/meta-loop"
 MAX_BRANCH_LENGTH = 96
@@ -34,6 +39,13 @@ QUEUE_RETENTION_POLICY_DAYS = {
     "prune_report": 7,
     "default": 21,
 }
+DEFAULT_COMPONENT_ORDER = (
+    "setup-check",
+    "setup-yes-warm",
+    "setup-yes-cold",
+    "profile-resolution",
+    "recipe-runtime",
+)
 
 
 def queue_retention_policy_days() -> dict[str, Any]:
@@ -258,6 +270,7 @@ def _all_run_summaries() -> list[dict[str, Any]]:
         except Exception:
             continue
         payload["_summary_path"] = str(path)
+        payload["_summary_mtime"] = path.stat().st_mtime
         summaries.append(payload)
     return summaries
 
@@ -312,6 +325,1178 @@ def collect_accepted_run_counts() -> dict[str, int]:
             continue
         counts[worker_id] = counts.get(worker_id, 0) + 1
     return counts
+
+
+def _knowledge_policy(repo_root: str | Path | None = None) -> dict[str, Any]:
+    repo = _repo_root(repo_root)
+    defaults = {
+        "indexed_paths": [
+            "knowledge",
+            "docs/current-harness-status.md",
+            "docs/setup-installer-architecture.md",
+            "docs/hybrid-harness.md",
+            "docs/promotion-content-quality.md",
+            "PARITY.md",
+        ],
+        "canonical_entrypoints": [
+            "knowledge/index.md",
+            "knowledge/log.md",
+        ],
+        "search_provider": "builtin",
+        "default_max_results": 5,
+        "snippet_chars": 240,
+        "compaction_budget_chars": 600,
+        "log_tail_entries": 5,
+    }
+    path = repo / "config" / "knowledge-policy.yaml"
+    if not path.exists():
+        return defaults
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return defaults
+    if isinstance(payload.get("knowledge_policy"), dict):
+        payload = payload["knowledge_policy"]
+    if not isinstance(payload, dict):
+        return defaults
+    merged = dict(defaults)
+    for key, value in payload.items():
+        if value not in (None, ""):
+            merged[key] = value
+    return merged
+
+
+def _wiki_index_db_path() -> Path:
+    return Path(ensure_control_plane_layout()["root"]) / "wiki-index.sqlite"
+
+
+def _knowledge_sync_state_path() -> Path:
+    return Path(ensure_control_plane_layout()["root"]) / "knowledge-sync.json"
+
+
+def _tracked_component_dir(repo: Path) -> Path:
+    return repo / "knowledge" / "components"
+
+
+def _tracked_query_dir(repo: Path) -> Path:
+    return repo / "knowledge" / "queries"
+
+
+def _tracked_source_dir(repo: Path) -> Path:
+    return repo / "knowledge" / "sources"
+
+
+def _tracked_index_path(repo: Path) -> Path:
+    return repo / "knowledge" / "index.md"
+
+
+def _tracked_log_path(repo: Path) -> Path:
+    return repo / "knowledge" / "log.md"
+
+
+def _tracked_source_index_path(repo: Path) -> Path:
+    return _tracked_source_dir(repo) / "index.md"
+
+
+def _component_sort_key(component: str) -> tuple[int, str]:
+    if component in DEFAULT_COMPONENT_ORDER:
+        return (DEFAULT_COMPONENT_ORDER.index(component), component)
+    return (len(DEFAULT_COMPONENT_ORDER), component)
+
+
+def _component_ids_from_summaries(summaries: list[dict[str, Any]]) -> list[str]:
+    seen = set(DEFAULT_COMPONENT_ORDER)
+    for summary in summaries:
+        objective = ""
+        harness = summary.get("harness_metadata", {})
+        if isinstance(harness, dict):
+            objective = str(harness.get("objective_component", "")).strip()
+        objective = objective or str(summary.get("objective_component", "")).strip()
+        if objective:
+            seen.add(objective)
+    return sorted(seen, key=_component_sort_key)
+
+
+def _relative_link(from_path: Path, target_path: Path) -> str:
+    return os.path.relpath(target_path, start=from_path.parent).replace(os.sep, "/")
+
+
+def _markdown_link(from_path: Path, target_path: Path, label: str | None = None) -> str:
+    return f"[{label or target_path.name}]({_relative_link(from_path, target_path)})"
+
+
+def _write_text_if_changed(path: Path, content: str, *, dry_run: bool) -> bool:
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return False
+    if not dry_run:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    return True
+
+
+def _markdown_title(path: Path) -> str:
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return path.stem.replace("-", " ").title()
+
+
+def _markdown_summary(path: Path) -> str:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        return stripped
+    return ""
+
+
+def _source_id_for_relpath(relpath: str) -> str:
+    return f"source-{_slug(relpath.replace('/', '-'))}"
+
+
+def _source_page_path(repo: Path, relpath: str) -> Path:
+    return _tracked_source_dir(repo) / f"{_source_id_for_relpath(relpath)}.md"
+
+
+def _query_page_path(repo: Path, slug: str) -> Path:
+    return _tracked_query_dir(repo) / f"{slug}.md"
+
+
+def _policy_entry_paths(repo: Path) -> list[Path]:
+    policy = _knowledge_policy(repo)
+    entries: list[Path] = []
+    for relpath in policy.get("canonical_entrypoints", []):
+        path = repo / relpath
+        if path.exists():
+            entries.append(path)
+    parity = repo / "PARITY.md"
+    if parity.exists():
+        entries.append(parity)
+    source_index = _tracked_source_index_path(repo)
+    if source_index.exists():
+        entries.append(source_index)
+    return entries
+
+
+def _source_specs(repo: Path, summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    specs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for path in _iter_policy_documents(_knowledge_policy(repo), repo):
+        relpath = os.path.relpath(path, repo).replace(os.sep, "/")
+        if relpath.startswith("knowledge/sources/"):
+            continue
+        source_type = "tracked_doc"
+        if relpath.startswith("knowledge/queries/"):
+            source_type = "query_page"
+        elif relpath.startswith("knowledge/"):
+            source_type = "tracked_knowledge"
+        if relpath not in seen:
+            seen.add(relpath)
+            specs.append(
+                {
+                    "relpath": relpath,
+                    "source_type": source_type,
+                    "title": _markdown_title(path),
+                    "summary": _markdown_summary(path),
+                }
+            )
+
+    for summary in summaries:
+        summary_path = summary.get("_summary_path")
+        if not summary_path:
+            continue
+        run_id = str(summary.get("run_id", "")).strip()
+        relpath = os.path.relpath(summary_path, repo).replace(os.sep, "/") if str(summary_path).startswith(str(repo)) else f".cache-source/{run_id}/summary.json"
+        if relpath in seen:
+            continue
+        seen.add(relpath)
+        specs.append(
+            {
+                "relpath": relpath,
+                "source_type": "control_plane_summary",
+                "title": f"Source Summary: {run_id}",
+                "summary": _compact_text(str(summary.get("summary", ""))),
+            }
+        )
+        report_path = str(summary.get("report_path", "")).strip()
+        if report_path:
+            report_relpath = os.path.relpath(report_path, repo).replace(os.sep, "/") if report_path.startswith(str(repo)) else f".cache-source/{run_id}/report.md"
+            if report_relpath not in seen:
+                seen.add(report_relpath)
+                specs.append(
+                    {
+                        "relpath": report_relpath,
+                        "source_type": "control_plane_report",
+                        "title": f"Source Report: {run_id}",
+                        "summary": f"Verification report for `{run_id}`.",
+                    }
+                )
+    return specs
+
+
+def _source_page_content(repo: Path, spec: dict[str, Any]) -> str:
+    relpath = str(spec["relpath"])
+    source_path = _source_page_path(repo, relpath)
+    return (
+        f"# Source: {spec['title']}\n\n"
+        f"- source type: `{spec['source_type']}`\n"
+        f"- source path: `{relpath}`\n"
+        f"- source id: `{_source_id_for_relpath(relpath)}`\n\n"
+        "## Summary\n\n"
+        f"- {spec['summary'] or '_No summary_'}\n\n"
+        "## Backlinks\n\n"
+        f"- {_markdown_link(source_path, _tracked_index_path(repo), 'knowledge/index.md')}\n"
+        f"- {_markdown_link(source_path, _tracked_log_path(repo), 'knowledge/log.md')}\n"
+    )
+
+
+def _iter_policy_documents(policy: dict[str, Any], repo: Path) -> list[Path]:
+    documents: list[Path] = []
+    seen: set[Path] = set()
+    for raw_path in policy.get("indexed_paths", []):
+        candidate = (repo / str(raw_path)).resolve()
+        if not candidate.exists():
+            continue
+        if candidate.is_dir():
+            for path in sorted(candidate.rglob("*.md")):
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                documents.append(resolved)
+            continue
+        if candidate.suffix == ".md" and candidate not in seen:
+            seen.add(candidate)
+            documents.append(candidate)
+    return documents
+
+
+def _backfill_promoted_knowledge(*, repo_root: str | Path | None = None, dry_run: bool = False) -> list[str]:
+    repo = _repo_root(repo_root)
+    backfilled: list[str] = []
+    for kind in ("sop", "skill"):
+        for metadata_path in sorted(_knowledge_dir(kind).glob("*.md.meta.json")):
+            try:
+                metadata = _json_load(metadata_path)
+            except Exception:
+                continue
+            if metadata.get("status") != "promoted":
+                continue
+            draft_path = Path(str(metadata_path).removesuffix(".meta.json"))
+            if not draft_path.exists():
+                continue
+            target_relpath = str(metadata.get("target_relpath", "")).strip()
+            if not target_relpath:
+                continue
+            target_path = repo / target_relpath
+            if target_path.exists():
+                continue
+            backfilled.append(target_relpath)
+            if not dry_run:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                target_path.write_text(draft_path.read_text(encoding="utf-8"), encoding="utf-8")
+    return backfilled
+
+
+def _skill_paths_for_worker(repo: Path, worker_model_id: str) -> list[Path]:
+    paths: list[Path] = []
+    exact = repo / "knowledge" / "skills" / f"worker-{_slug(worker_model_id)}.md"
+    if exact.exists():
+        paths.append(exact)
+    generic_candidates = []
+    worker_lower = worker_model_id.lower()
+    if "gemma4" in worker_lower:
+        generic_candidates.append(repo / "knowledge" / "skills" / "worker-gemma4-local.md")
+    if "apfel" in worker_lower:
+        generic_candidates.append(repo / "knowledge" / "skills" / "worker-apfel-lowlatency.md")
+    for candidate in generic_candidates:
+        if candidate.exists() and candidate not in paths:
+            paths.append(candidate)
+    return paths
+
+
+def _open_failures_by_component() -> dict[str, list[dict[str, Any]]]:
+    failures: dict[str, list[dict[str, Any]]] = {}
+    layout = ensure_control_plane_layout()
+    for path in sorted(Path(layout["failures_open"]).glob("*.json")):
+        try:
+            payload = _json_load(path)
+        except Exception:
+            continue
+        component = str(payload.get("component", "")).strip() or "unspecified"
+        failures.setdefault(component, []).append(
+            {
+                "path": str(path),
+                "failure_type": str(payload.get("failure_type", "")).strip(),
+                "source_run_id": str(payload.get("source_run_id", "")).strip(),
+            }
+        )
+    return failures
+
+
+def _component_page_content(
+    *,
+    repo: Path,
+    component: str,
+    summaries: list[dict[str, Any]],
+    policy: dict[str, Any],
+) -> str:
+    context = harness_component_context(component)
+    accepted_runs: list[dict[str, Any]] = []
+    verification_runs: list[dict[str, Any]] = []
+    failure_types: set[str] = set()
+    skill_paths: list[Path] = []
+    source_paths: list[Path] = []
+    for summary in sorted(summaries, key=lambda item: item.get("_summary_mtime", 0), reverse=True):
+        entry = _run_entry(Path(summary.get("_summary_path", "")), summary)
+        if entry["run_kind"] == "verification_only":
+            verification_runs.append(entry)
+        elif _is_accepted_summary(summary):
+            accepted_runs.append(entry)
+        for failure_type in summary.get("failure_causes", []):
+            if str(failure_type).strip():
+                failure_types.add(str(failure_type).strip())
+        worker_id = _selected_worker_id(summary)
+        if worker_id:
+            for path in _skill_paths_for_worker(repo, worker_id):
+                if path not in skill_paths:
+                    skill_paths.append(path)
+        summary_relpath = os.path.relpath(str(summary.get("_summary_path", "")), repo).replace(os.sep, "/") if str(summary.get("_summary_path", "")).startswith(str(repo)) else f".cache-source/{entry['run_id']}/summary.json"
+        source_paths.append(_source_page_path(repo, summary_relpath))
+        report_path = str(entry.get("report_path", "")).strip()
+        if report_path:
+            report_relpath = os.path.relpath(report_path, repo).replace(os.sep, "/") if report_path.startswith(str(repo)) else f".cache-source/{entry['run_id']}/report.md"
+            source_paths.append(_source_page_path(repo, report_relpath))
+
+    open_failures = _open_failures_by_component().get(component, [])
+    for item in open_failures:
+        if item.get("failure_type"):
+            failure_types.add(item["failure_type"])
+
+    sop_paths = []
+    for failure_type in sorted(failure_types):
+        candidate = repo / "knowledge" / "sops" / f"failure-{_slug(failure_type)}.md"
+        if candidate.exists():
+            sop_paths.append(candidate)
+
+    target_path = _tracked_component_dir(repo) / f"{component}.md"
+    accepted_lines = []
+    for item in accepted_runs[:5]:
+        compacted = compact_output("summary", str(item.get("summary", "")), budget_chars=policy["snippet_chars"])
+        suffix = f" pr={item.get('pr_url')}" if item.get("pr_url") else ""
+        accepted_lines.append(
+            f"`{item['run_id']}` metric=`{item.get('metric_key', '')}` summary={compacted['text']}{suffix}"
+        )
+    verification_lines = []
+    for item in verification_runs[:5]:
+        compacted = compact_output("summary", str(item.get("summary", "")), budget_chars=policy["snippet_chars"])
+        verification_lines.append(
+            f"`{item['run_id']}` metric=`{item.get('metric_key', '')}` summary={compacted['text']}"
+        )
+    open_failure_lines = [
+        f"`{item['failure_type']}` source_run=`{item.get('source_run_id', '') or 'unknown'}`"
+        for item in open_failures
+        if item.get("failure_type")
+    ]
+    sop_lines = [
+        f"{_markdown_link(target_path, path)}"
+        for path in sop_paths
+    ]
+    skill_lines = [
+        f"{_markdown_link(target_path, path)}"
+        for path in skill_paths
+    ]
+    source_lines = [
+        f"{_markdown_link(target_path, path)}"
+        for path in source_paths
+        if path.exists()
+    ]
+    return (
+        f"# Component: {component}\n\n"
+        "Generated from control-plane evidence and tracked harness knowledge.\n\n"
+        "## Contract\n\n"
+        f"- benchmark command: `{context.get('benchmark_command', '')}`\n"
+        f"- success signal: {context.get('success_signal', '')}\n"
+        f"- metric key: `{context.get('metric_key', '')}`\n"
+        "\n## Related Knowledge\n\n"
+        "### SOPs\n\n"
+        f"{_bullet_block(sop_lines)}\n\n"
+        "### Skills\n\n"
+        f"{_bullet_block(skill_lines)}\n\n"
+        "### Sources\n\n"
+        f"{_bullet_block(source_lines)}\n\n"
+        "## Recent Accepted Runs\n\n"
+        f"{_bullet_block(accepted_lines)}\n\n"
+        "## Recent Verification-Only Runs\n\n"
+        f"{_bullet_block(verification_lines)}\n\n"
+        "## Current Open Failures\n\n"
+        f"{_bullet_block(open_failure_lines)}\n"
+    )
+
+
+def _index_content(
+    *,
+    repo: Path,
+    component_ids: list[str],
+    policy: dict[str, Any],
+) -> str:
+    index_path = _tracked_index_path(repo)
+    component_lines = []
+    for component in component_ids:
+        component_path = _tracked_component_dir(repo) / f"{component}.md"
+        if not component_path.exists():
+            continue
+        component_lines.append(f"{_markdown_link(index_path, component_path, component)}")
+
+    sop_lines = []
+    for path in sorted((repo / "knowledge" / "sops").glob("*.md")):
+        sop_lines.append(f"{_markdown_link(index_path, path, _markdown_title(path))}")
+
+    skill_lines = []
+    for path in sorted((repo / "knowledge" / "skills").glob("*.md")):
+        skill_lines.append(f"{_markdown_link(index_path, path, _markdown_title(path))}")
+
+    query_lines = []
+    for path in sorted(_tracked_query_dir(repo).glob("*.md")):
+        query_lines.append(f"{_markdown_link(index_path, path, _markdown_title(path))}")
+
+    source_lines = []
+    for path in sorted(_tracked_source_dir(repo).glob("*.md")):
+        source_lines.append(f"{_markdown_link(index_path, path, _markdown_title(path))}")
+
+    reference_lines = []
+    for path in _iter_policy_documents(policy, repo):
+        relpath = os.path.relpath(path, repo).replace(os.sep, "/")
+        if relpath.startswith("knowledge/"):
+            continue
+        reference_lines.append(f"{_markdown_link(index_path, path, relpath)}")
+
+    entrypoint_lines = []
+    for relpath in policy.get("canonical_entrypoints", []):
+        target = repo / relpath
+        if target.exists():
+            entrypoint_lines.append(f"{_markdown_link(index_path, target, relpath)}")
+    parity_target = repo / "PARITY.md"
+    if parity_target.exists():
+        entrypoint_lines.append(f"{_markdown_link(index_path, parity_target, 'PARITY.md')}")
+    return (
+        "# Angella Harness Wiki Index\n\n"
+        "This file is the canonical entry point for tracked harness knowledge.\n\n"
+        "## Entry Points\n\n"
+        f"{_bullet_block(entrypoint_lines)}\n\n"
+        "## Components\n\n"
+        f"{_bullet_block(component_lines)}\n\n"
+        "## Failure Patterns\n\n"
+        f"{_bullet_block(sop_lines)}\n\n"
+        "## Worker Patterns\n\n"
+        f"{_bullet_block(skill_lines)}\n\n"
+        "## Queries\n\n"
+        f"{_bullet_block(query_lines)}\n\n"
+        "## Sources\n\n"
+        f"{_bullet_block(source_lines)}\n\n"
+        "## Reference Docs\n\n"
+        f"{_bullet_block(reference_lines)}\n"
+    )
+
+
+def _ensure_log_header(log_path: Path, *, dry_run: bool) -> str:
+    if log_path.exists():
+        return log_path.read_text(encoding="utf-8")
+    header = (
+        "# Angella Harness Wiki Log\n\n"
+        "Append-only event log for accepted runs, verification-only runs, parity updates, and sync lint passes.\n"
+    )
+    if not dry_run:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(header, encoding="utf-8")
+    return header
+
+
+def _source_index_content(repo: Path) -> str:
+    index_path = _tracked_source_index_path(repo)
+    lines = [
+        _markdown_link(index_path, path, _markdown_title(path))
+        for path in sorted(_tracked_source_dir(repo).glob("*.md"))
+        if path.name != "index.md"
+    ]
+    return (
+        "# Harness Source Index\n\n"
+        "Tracked raw-source mirror pages used by the harness wiki.\n\n"
+        "## Sources\n\n"
+        f"{_bullet_block(lines)}\n"
+    )
+
+
+def _append_log_entries(
+    *,
+    repo: Path,
+    policy: dict[str, Any],
+    source_summaries: list[dict[str, Any]],
+    updated_paths: list[str],
+    dry_run: bool,
+    run_id: str,
+    source_kind: str,
+    indexed_document_count: int,
+) -> list[str]:
+    log_path = _tracked_log_path(repo)
+    existing = _ensure_log_header(log_path, dry_run=dry_run)
+    markers = set(re.findall(r"<!-- angella-log:([^>]+) -->", existing))
+    entries: list[str] = []
+    added_markers: list[str] = []
+
+    for summary in sorted(source_summaries, key=lambda item: item.get("_summary_mtime", 0)):
+        entry = _run_entry(Path(summary.get("_summary_path", "")), summary)
+        kind = "verification" if entry["run_kind"] == "verification_only" else "accepted"
+        marker = f"{kind}:{entry['run_id']}"
+        if marker in markers:
+            continue
+        added_markers.append(marker)
+        summary_text = compact_output("summary", str(entry.get("summary", "")), budget_chars=policy["snippet_chars"])
+        heading_date = _dt.datetime.fromtimestamp(summary.get("_summary_mtime", time.time())).strftime("%Y-%m-%d")
+        component_path = _tracked_component_dir(repo) / f"{entry.get('objective_component') or 'recipe-runtime'}.md"
+        component_link = (
+            _markdown_link(log_path, component_path, component_path.stem)
+            if component_path.exists()
+            else f"`{entry.get('objective_component') or 'unspecified'}`"
+        )
+        entries.append(
+            f"\n## [{heading_date}] {kind} | {entry.get('objective_component') or 'unspecified'} | {entry['run_id']}\n"
+            f"<!-- angella-log:{marker} -->\n"
+            f"- component: {component_link}\n"
+            f"- metric: `{entry.get('metric_key', '')}`\n"
+            f"- summary: {summary_text['text']}\n"
+        )
+
+    parity_file = repo / "PARITY.md"
+    if parity_file.exists():
+        fingerprint = _content_fingerprint(parity_file.read_text(encoding="utf-8"))
+        marker = f"parity:{fingerprint}"
+        if marker not in markers:
+            added_markers.append(marker)
+            entries.append(
+                f"\n## [{_dt.datetime.now().strftime('%Y-%m-%d')}] parity | PARITY.md\n"
+                f"<!-- angella-log:{marker} -->\n"
+                f"- canonical file: {_markdown_link(log_path, parity_file, 'PARITY.md')}\n"
+                "- role: product-truth behavioral checklist\n"
+            )
+
+    if updated_paths:
+        fingerprint = _content_fingerprint("\n".join(sorted(updated_paths + [run_id, source_kind])))
+        marker = f"lint:{fingerprint}"
+        if marker not in markers:
+            added_markers.append(marker)
+            updated_lines = "\n".join(f"- `{path}`" for path in updated_paths)
+            entries.append(
+                f"\n## [{_dt.datetime.now().strftime('%Y-%m-%d')}] lint | harness knowledge sync\n"
+                f"<!-- angella-log:{marker} -->\n"
+                f"- indexed documents: `{indexed_document_count}`\n"
+                f"{updated_lines}\n"
+            )
+
+    if entries and not dry_run:
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write("".join(entries))
+    return added_markers
+
+
+def _rebuild_wiki_index(*, repo_root: str | Path | None = None) -> dict[str, Any]:
+    repo = _repo_root(repo_root)
+    policy = _knowledge_policy(repo)
+    db_path = _wiki_index_db_path()
+    documents = _iter_policy_documents(policy, repo)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("DROP TABLE IF EXISTS docs")
+        conn.execute("DROP TABLE IF EXISTS docs_fts")
+        conn.execute(
+            "CREATE TABLE docs (relpath TEXT PRIMARY KEY, abs_path TEXT, title TEXT, category TEXT, content TEXT)"
+        )
+        engine = "fts5"
+        try:
+            conn.execute(
+                "CREATE VIRTUAL TABLE docs_fts USING fts5(relpath UNINDEXED, title, category, content)"
+            )
+        except sqlite3.OperationalError:
+            engine = "like"
+
+        for path in documents:
+            relpath = os.path.relpath(path, repo).replace(os.sep, "/")
+            content = path.read_text(encoding="utf-8")
+            title = _markdown_title(path)
+            category = relpath.split("/", 1)[0]
+            conn.execute(
+                "INSERT INTO docs(relpath, abs_path, title, category, content) VALUES (?, ?, ?, ?, ?)",
+                (relpath, str(path), title, category, content),
+            )
+            if engine == "fts5":
+                conn.execute(
+                    "INSERT INTO docs_fts(relpath, title, category, content) VALUES (?, ?, ?, ?)",
+                    (relpath, title, category, content),
+                )
+        conn.commit()
+    return {
+        "db_path": str(db_path),
+        "document_count": len(documents),
+        "engine": engine,
+    }
+
+
+def _snippet_for_query(content: str, query: str, *, budget_chars: int) -> dict[str, Any]:
+    lowered = content.lower()
+    position = 0
+    for token in [part for part in re.split(r"\s+", query.lower().strip()) if part]:
+        candidate = lowered.find(token)
+        if candidate >= 0:
+            position = candidate
+            break
+    start = max(0, position - (budget_chars // 2))
+    end = min(len(content), start + budget_chars)
+    return compact_output("search_snippet", content[start:end], budget_chars=budget_chars)
+
+
+def _fts_match_query(query: str) -> str:
+    tokens = [token for token in re.findall(r"[A-Za-z0-9_.:/-]+", query) if token]
+    if not tokens:
+        return query
+    return " OR ".join(f'"{token}"' for token in tokens)
+
+
+def _coerce_qmd_results(payload: Any, *, limit: int) -> list[dict[str, Any]]:
+    if isinstance(payload, dict):
+        if isinstance(payload.get("results"), list):
+            payload = payload["results"]
+        elif isinstance(payload.get("items"), list):
+            payload = payload["items"]
+        else:
+            payload = [payload]
+    if not isinstance(payload, list):
+        return []
+    results: list[dict[str, Any]] = []
+    for item in payload[:limit]:
+        if not isinstance(item, dict):
+            continue
+        relpath = str(item.get("relpath") or item.get("path") or item.get("file") or "").strip()
+        if not relpath:
+            continue
+        results.append(
+            {
+                "relpath": relpath,
+                "title": str(item.get("title") or Path(relpath).name).strip(),
+                "category": str(item.get("category") or relpath.split("/", 1)[0]).strip(),
+                "score": item.get("score", 0.0),
+                "snippet": str(item.get("snippet") or item.get("excerpt") or "").strip(),
+            }
+        )
+    return results
+
+
+def _qmd_search(query: str, *, limit: int, repo: Path, budget_chars: int) -> dict[str, Any]:
+    qmd_binary = shutil.which("qmd")
+    if not qmd_binary:
+        return {"available": False, "reason": "qmd_not_installed", "results": []}
+    command_variants = [
+        [qmd_binary, "search", query, "--json", "-n", str(limit)],
+        [qmd_binary, "search", query, "--json", "--limit", str(limit)],
+    ]
+    for command in command_variants:
+        result = subprocess.run(
+            command,
+            cwd=str(repo),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            continue
+        try:
+            payload = json.loads(result.stdout)
+        except Exception:
+            continue
+        results = []
+        for item in _coerce_qmd_results(payload, limit=limit):
+            compacted = compact_output("search_snippet", item.get("snippet", ""), budget_chars=budget_chars)
+            results.append(
+                {
+                    **item,
+                    "snippet": compacted["text"],
+                    "compaction": telemetry_block(compacted),
+                }
+            )
+        return {"available": True, "reason": "", "results": results}
+    return {"available": False, "reason": "qmd_invocation_failed", "results": []}
+
+
+def search_harness_knowledge(
+    query: str,
+    *,
+    limit: int = 5,
+    provider: str = "builtin",
+    repo_root: str | Path | None = None,
+) -> dict[str, Any]:
+    repo = _repo_root(repo_root)
+    policy = _knowledge_policy(repo)
+    selected_provider = provider or str(policy.get("search_provider", "builtin"))
+    budget_chars = int(policy.get("snippet_chars", 240))
+    if selected_provider == "qmd":
+        qmd_result = _qmd_search(query, limit=limit, repo=repo, budget_chars=budget_chars)
+        if qmd_result["available"]:
+            index_info = _rebuild_wiki_index(repo_root=repo)
+            return {
+                "success": True,
+                "requested_provider": "qmd",
+                "provider": "qmd",
+                "engine": "external_qmd",
+                "query": query,
+                "limit": limit,
+                "index_db_path": index_info["db_path"],
+                "document_count": index_info["document_count"],
+                "results": qmd_result["results"],
+                "fallback_reason": "",
+            }
+        selected_provider = "builtin"
+        fallback_reason = qmd_result["reason"]
+    elif selected_provider != "builtin":
+        return {
+            "success": False,
+            "provider": selected_provider,
+            "error": "Unsupported search provider.",
+        }
+    else:
+        fallback_reason = ""
+
+    index_info = _rebuild_wiki_index(repo_root=repo)
+    results: list[dict[str, Any]] = []
+    with sqlite3.connect(index_info["db_path"]) as conn:
+        if index_info["engine"] == "fts5":
+            statement = (
+                "SELECT docs.relpath, docs.title, docs.category, docs.content, bm25(docs_fts) AS rank "
+                "FROM docs_fts JOIN docs USING(relpath) "
+                "WHERE docs_fts MATCH ? ORDER BY rank LIMIT ?"
+            )
+            try:
+                rows = conn.execute(statement, (_fts_match_query(query), limit)).fetchall()
+            except sqlite3.OperationalError:
+                rows = []
+        else:
+            rows = []
+
+        if not rows:
+            tokens = [token.lower() for token in re.findall(r"[A-Za-z0-9_.:/-]+", query) if token]
+            if not tokens:
+                tokens = [query.lower()]
+            clauses = " OR ".join("(lower(title) LIKE ? OR lower(content) LIKE ?)" for _ in tokens)
+            params: list[Any] = []
+            for token in tokens:
+                pattern = f"%{token}%"
+                params.extend([pattern, pattern])
+            params.append(limit)
+            rows = conn.execute(
+                f"SELECT relpath, title, category, content, 0.0 AS rank FROM docs "
+                f"WHERE {clauses} ORDER BY relpath LIMIT ?",
+                params,
+            ).fetchall()
+
+    for relpath, title, category, content, rank in rows[:limit]:
+        compacted = _snippet_for_query(str(content), query, budget_chars=budget_chars)
+        results.append(
+            {
+                "relpath": relpath,
+                "title": title,
+                "category": category,
+                "score": rank,
+                "snippet": compacted["text"],
+                "compaction": telemetry_block(compacted),
+            }
+        )
+
+    return {
+        "success": True,
+        "requested_provider": provider or str(policy.get("search_provider", "builtin")),
+        "provider": selected_provider,
+        "engine": index_info["engine"],
+        "query": query,
+        "limit": limit,
+        "index_db_path": index_info["db_path"],
+        "document_count": index_info["document_count"],
+        "results": results,
+        "fallback_reason": fallback_reason,
+    }
+
+
+def inspect_harness_knowledge(
+    *,
+    format: str = "json",
+    repo_root: str | Path | None = None,
+) -> dict[str, Any]:
+    repo = _repo_root(repo_root)
+    policy = _knowledge_policy(repo)
+    state_path = _knowledge_sync_state_path()
+    state = _json_load(state_path) if state_path.exists() else {}
+    index_info = _rebuild_wiki_index(repo_root=repo)
+    log_path = _tracked_log_path(repo)
+    log_entries = []
+    if log_path.exists():
+        for line in log_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("## ["):
+                log_entries.append(line)
+    component_paths = sorted(_tracked_component_dir(repo).glob("*.md"))
+    query_paths = sorted(_tracked_query_dir(repo).glob("*.md"))
+    source_paths = [path for path in sorted(_tracked_source_dir(repo).glob("*.md")) if path.name != "index.md"]
+    payload = {
+        "format": "json",
+        "search_provider": str(policy.get("search_provider", "builtin")),
+        "canonical_entrypoints": list(policy.get("canonical_entrypoints", [])),
+        "schema_path": str(repo / "knowledge" / "schema.md"),
+        "index_path": str(_tracked_index_path(repo)),
+        "log_path": str(log_path),
+        "component_paths": [str(path) for path in component_paths],
+        "query_paths": [str(path) for path in query_paths],
+        "source_paths": [str(path) for path in source_paths],
+        "component_count": len(component_paths),
+        "query_count": len(query_paths),
+        "source_count": len(source_paths),
+        "index_db_path": index_info["db_path"],
+        "indexed_document_count": index_info["document_count"],
+        "recent_log_entries": log_entries[-int(policy.get("log_tail_entries", 5)):],
+        "last_sync": state,
+    }
+    if format == "markdown":
+        payload["format"] = "markdown"
+        payload["content"] = (
+            "# Harness Knowledge Overview\n\n"
+            f"- search provider: `{payload['search_provider']}`\n"
+            f"- indexed documents: `{payload['indexed_document_count']}`\n"
+            f"- component pages: `{payload['component_count']}`\n"
+            f"- query pages: `{payload['query_count']}`\n"
+            f"- source pages: `{payload['source_count']}`\n"
+            f"- index db: `{payload['index_db_path']}`\n\n"
+            "## Entry Points\n\n"
+            f"- `knowledge/schema.md`\n- `knowledge/index.md`\n- `knowledge/log.md`\n- `knowledge/sources/index.md`\n\n"
+            "## Components\n\n"
+            f"{_bullet_block([f'`{Path(path).name}`' for path in payload['component_paths']])}\n\n"
+            "## Queries\n\n"
+            f"{_bullet_block([f'`{Path(path).name}`' for path in payload['query_paths']])}\n\n"
+            "## Sources\n\n"
+            f"{_bullet_block([f'`{Path(path).name}`' for path in payload['source_paths']])}\n\n"
+            "## Recent Log Entries\n\n"
+            f"{_bullet_block([f'`{entry}`' for entry in payload['recent_log_entries']])}\n"
+        )
+    return payload
+
+
+def sync_harness_knowledge(
+    run_id: str = "",
+    *,
+    source_kind: str = "recent",
+    dry_run: bool = False,
+    include_backfill: bool = True,
+    repo_root: str | Path | None = None,
+) -> dict[str, Any]:
+    repo = _repo_root(repo_root)
+    policy = _knowledge_policy(repo)
+    repo_summaries = _all_run_summaries()
+    component_ids = _component_ids_from_summaries(repo_summaries)
+    updated_paths: list[str] = []
+    backfilled_paths = (
+        _backfill_promoted_knowledge(repo_root=repo, dry_run=dry_run)
+        if include_backfill
+        else []
+    )
+    updated_paths.extend(backfilled_paths)
+
+    for spec in _source_specs(repo, repo_summaries):
+        source_path = _source_page_path(repo, spec["relpath"])
+        if _write_text_if_changed(source_path, _source_page_content(repo, spec), dry_run=dry_run):
+            updated_paths.append(os.path.relpath(source_path, repo).replace(os.sep, "/"))
+    source_index_path = _tracked_source_index_path(repo)
+    if _write_text_if_changed(source_index_path, _source_index_content(repo), dry_run=dry_run):
+        updated_paths.append(os.path.relpath(source_index_path, repo).replace(os.sep, "/"))
+
+    components_dir = _tracked_component_dir(repo)
+    for component in component_ids:
+        component_summaries = []
+        for summary in repo_summaries:
+            objective = ""
+            harness = summary.get("harness_metadata", {})
+            if isinstance(harness, dict):
+                objective = str(harness.get("objective_component", "")).strip()
+            objective = objective or str(summary.get("objective_component", "")).strip()
+            if objective == component:
+                component_summaries.append(summary)
+        content = _component_page_content(
+            repo=repo,
+            component=component,
+            summaries=component_summaries,
+            policy=policy,
+        )
+        component_path = components_dir / f"{component}.md"
+        if _write_text_if_changed(component_path, content, dry_run=dry_run):
+            updated_paths.append(os.path.relpath(component_path, repo).replace(os.sep, "/"))
+
+    index_content = _index_content(repo=repo, component_ids=component_ids, policy=policy)
+    index_path = _tracked_index_path(repo)
+    if _write_text_if_changed(index_path, index_content, dry_run=dry_run):
+        updated_paths.append(os.path.relpath(index_path, repo).replace(os.sep, "/"))
+
+    source_summaries = repo_summaries
+    if run_id:
+        source_summaries = [summary for summary in repo_summaries if summary.get("run_id") == run_id]
+    index_info = _rebuild_wiki_index(repo_root=repo)
+    added_log_markers = _append_log_entries(
+        repo=repo,
+        policy=policy,
+        source_summaries=source_summaries,
+        updated_paths=updated_paths,
+        dry_run=dry_run,
+        run_id=run_id,
+        source_kind=source_kind,
+        indexed_document_count=index_info["document_count"],
+    )
+    if added_log_markers:
+        updated_paths.append("knowledge/log.md")
+        index_info = _rebuild_wiki_index(repo_root=repo)
+
+    state = {
+        "run_id": run_id,
+        "source_kind": source_kind,
+        "synced_at": _now_timestamp(),
+        "include_backfill": include_backfill,
+        "updated_paths": sorted(set(updated_paths)),
+        "backfilled_paths": sorted(set(backfilled_paths)),
+        "component_count": len(component_ids),
+        "search_provider": str(policy.get("search_provider", "builtin")),
+        "index_db_path": index_info["db_path"],
+        "indexed_document_count": index_info["document_count"],
+        "log_entries_added": added_log_markers,
+    }
+    if not dry_run:
+        _json_dump(_knowledge_sync_state_path(), state)
+    return {
+        "run_id": run_id,
+        "source_kind": source_kind,
+        "dry_run": dry_run,
+        "side_effects_applied": not dry_run,
+        **state,
+    }
+
+
+def _required_schema_sections() -> list[str]:
+    return [
+        "## Layers",
+        "## Entry Points",
+        "## Component Pages",
+        "## Linking Rules",
+        "## Log Rules",
+        "## Addendum Rules",
+        "## Search Rules",
+        "## Non-Goals",
+    ]
+
+
+def _validate_harness_schema_and_policy(repo: Path) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    schema_path = repo / "knowledge" / "schema.md"
+    if not schema_path.exists():
+        issues.append({"kind": "missing_schema", "path": str(schema_path), "message": "knowledge/schema.md is missing."})
+    else:
+        schema_text = schema_path.read_text(encoding="utf-8")
+        for section in _required_schema_sections():
+            if section not in schema_text:
+                issues.append(
+                    {
+                        "kind": "schema_section_missing",
+                        "path": str(schema_path),
+                        "message": f"Missing required schema section: {section}",
+                    }
+                )
+
+    policy_path = repo / "config" / "knowledge-policy.yaml"
+    policy = _knowledge_policy(repo)
+    for key in ("indexed_paths", "canonical_entrypoints", "search_provider", "snippet_chars"):
+        if key not in policy:
+            issues.append(
+                {
+                    "kind": "policy_key_missing",
+                    "path": str(policy_path),
+                    "message": f"Missing required policy key: {key}",
+                }
+            )
+    return issues
+
+
+def _extract_markdown_links(path: Path) -> list[tuple[str, str]]:
+    links = []
+    for match in re.finditer(r"\[([^\]]+)\]\(([^)]+)\)", path.read_text(encoding="utf-8")):
+        links.append((match.group(1), match.group(2)))
+    return links
+
+
+def _record_lint_log(repo: Path, issues: list[dict[str, Any]], *, dry_run: bool) -> None:
+    log_path = _tracked_log_path(repo)
+    existing = _ensure_log_header(log_path, dry_run=dry_run)
+    fingerprint = _content_fingerprint(json.dumps(issues, ensure_ascii=False))
+    marker = f"lint-audit:{fingerprint}"
+    if marker in existing:
+        return
+    body = (
+        f"\n## [{_dt.datetime.now().strftime('%Y-%m-%d')}] lint-audit | harness knowledge\n"
+        f"<!-- angella-log:{marker} -->\n"
+        f"- issue count: `{len(issues)}`\n"
+    )
+    if issues:
+        body += "\n".join(f"- {issue['kind']}: {issue['message']}" for issue in issues[:10]) + "\n"
+    else:
+        body += "- no issues detected\n"
+    if not dry_run:
+        with open(log_path, "a", encoding="utf-8") as handle:
+            handle.write(body)
+
+
+def lint_harness_knowledge(
+    *,
+    repo_root: str | Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    repo = _repo_root(repo_root)
+    issues: list[dict[str, Any]] = []
+    issues.extend(_validate_harness_schema_and_policy(repo))
+
+    index_path = _tracked_index_path(repo)
+    log_path = _tracked_log_path(repo)
+    index_text = index_path.read_text(encoding="utf-8") if index_path.exists() else ""
+    log_text = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+    tracked_pages = []
+    for folder in (
+        _tracked_component_dir(repo),
+        repo / "knowledge" / "skills",
+        repo / "knowledge" / "sops",
+        _tracked_query_dir(repo),
+        _tracked_source_dir(repo),
+    ):
+        if folder.exists():
+            tracked_pages.extend(sorted(path for path in folder.glob("*.md")))
+
+    for path in tracked_pages:
+        if path.name == "index.md" and path.parent == _tracked_source_dir(repo):
+            continue
+        relpath = os.path.relpath(path, repo).replace(os.sep, "/")
+        index_rel = os.path.relpath(path, index_path.parent).replace(os.sep, "/") if index_path.exists() else relpath
+        log_rel = os.path.relpath(path, log_path.parent).replace(os.sep, "/") if log_path.exists() else relpath
+        if path.parent == _tracked_component_dir(repo):
+            if relpath not in index_text and index_rel not in index_text:
+                issues.append({"kind": "missing_index_registration", "path": str(path), "message": f"{relpath} is not referenced from knowledge/index.md"})
+        if path.parent in {_tracked_query_dir(repo), _tracked_source_dir(repo)}:
+            if relpath not in log_text and log_rel not in log_text and relpath not in index_text and index_rel not in index_text:
+                issues.append({"kind": "orphan_page", "path": str(path), "message": f"{relpath} is not referenced from knowledge/index.md or knowledge/log.md"})
+        for _, target in _extract_markdown_links(path):
+            if target.startswith("http://") or target.startswith("https://") or target.startswith("#"):
+                continue
+            resolved = (path.parent / target).resolve()
+            if not resolved.exists():
+                issues.append({"kind": "broken_relative_link", "path": str(path), "message": f"Broken relative link: {target}"})
+
+    summaries = _all_run_summaries()
+    for component in _component_ids_from_summaries(summaries):
+        component_path = _tracked_component_dir(repo) / f"{component}.md"
+        if not component_path.exists():
+            issues.append({"kind": "missing_component_page", "path": str(component_path), "message": f"Missing component page for {component}"})
+            continue
+        latest_summary = ""
+        latest_time = -1.0
+        for summary in summaries:
+            harness = summary.get("harness_metadata", {})
+            objective = ""
+            if isinstance(harness, dict):
+                objective = str(harness.get("objective_component", "")).strip()
+            objective = objective or str(summary.get("objective_component", "")).strip()
+            if objective != component:
+                continue
+            if float(summary.get("_summary_mtime", 0)) > latest_time:
+                latest_time = float(summary.get("_summary_mtime", 0))
+                latest_summary = compact_output("summary", str(summary.get("summary", "")), budget_chars=240)["text"]
+        if latest_summary and latest_summary not in component_path.read_text(encoding="utf-8"):
+            issues.append(
+                {
+                    "kind": "stale_component_page",
+                    "path": str(component_path),
+                    "message": f"Latest summary for {component} is not reflected in the component page.",
+                }
+            )
+
+    parity_runner = repo / "scripts" / "run_harness_parity_diff.py"
+    if parity_runner.exists():
+        parity_result = subprocess.run(
+            [str(parity_runner)],
+            cwd=str(repo),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if parity_result.returncode != 0:
+            issues.append(
+                {
+                    "kind": "parity_mismatch",
+                    "path": str(repo / "PARITY.md"),
+                    "message": parity_result.stderr.strip() or "PARITY.md does not match the scenario map/state.",
+                }
+            )
+
+    _record_lint_log(repo, issues, dry_run=dry_run)
+    return {
+        "success": len(issues) == 0,
+        "dry_run": dry_run,
+        "issue_count": len(issues),
+        "issues": issues,
+    }
+
+
+def save_harness_query_page(
+    *,
+    query: str,
+    answer_summary: str,
+    cited_paths: list[str] | None = None,
+    generated_artifacts: list[str] | None = None,
+    save_reason: str = "",
+    title: str = "",
+    dry_run: bool = False,
+    repo_root: str | Path | None = None,
+) -> dict[str, Any]:
+    repo = _repo_root(repo_root)
+    cited_paths = [str(path) for path in (cited_paths or []) if str(path).strip()]
+    generated_artifacts = [str(path) for path in (generated_artifacts or []) if str(path).strip()]
+    slug = f"{_dt.datetime.now().strftime('%Y%m%d')}-{_slug(title or query)[:48]}"
+    page_path = _query_page_path(repo, slug)
+    cited_block = _bullet_block([f"`{path}`" for path in cited_paths])
+    artifact_block = _bullet_block([f"`{path}`" for path in generated_artifacts])
+    content = (
+        f"# Query: {title or _compact_text(query, 72)}\n\n"
+        f"- saved at: `{_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}`\n"
+        f"- save reason: {save_reason or '_Not specified_'}\n\n"
+        "## Query\n\n"
+        f"```text\n{query}\n```\n\n"
+        "## Answer Summary\n\n"
+        f"- {answer_summary}\n\n"
+        "## Cited Paths\n\n"
+        f"{cited_block}\n\n"
+        "## Generated Artifacts\n\n"
+        f"{artifact_block}\n"
+    )
+    if not dry_run:
+        page_path.parent.mkdir(parents=True, exist_ok=True)
+        page_path.write_text(content, encoding="utf-8")
+    sync_result = sync_harness_knowledge(
+        source_kind="query",
+        dry_run=dry_run,
+        include_backfill=False,
+        repo_root=repo,
+    )
+    return {
+        "success": True,
+        "dry_run": dry_run,
+        "page_path": str(page_path),
+        "sync": sync_result,
+    }
 
 
 def _knowledge_dir(kind: str) -> Path:
@@ -1107,6 +2292,35 @@ def _annotate_run_summary_with_finalize(
     return summary_payload
 
 
+def _annotate_summary_with_knowledge_sync(
+    *,
+    run_id: str,
+    knowledge_sync: dict[str, Any],
+    compaction: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    path = _summary_path(run_id)
+    summary_payload = load_run_summary(run_id)
+    summary_payload["knowledge_sync"] = knowledge_sync
+    if compaction:
+        existing_compaction = summary_payload.get("compaction", {})
+        if not isinstance(existing_compaction, dict):
+            existing_compaction = {}
+        existing_compaction.update(compaction)
+        summary_payload["compaction"] = existing_compaction
+    _json_dump(path, summary_payload)
+    append_jsonl(
+        path.parent / "telemetry.jsonl",
+        {
+            "event_type": "knowledge_sync",
+            "timestamp": _now_timestamp(),
+            "run_id": run_id,
+            "knowledge_sync": knowledge_sync,
+            "compaction": compaction or {},
+        },
+    )
+    return summary_payload
+
+
 def inspect_control_plane(
     *,
     run_limit: int = 5,
@@ -1255,6 +2469,7 @@ def record_verification_only_run(
     working_directory: str,
     branch_name: str = "",
     finalize_skipped_reason: str = "",
+    repo_root: str | Path | None = None,
 ) -> dict[str, Any]:
     run_path = run_dir(run_id)
     recorded_at = _now_timestamp()
@@ -1274,7 +2489,6 @@ def record_verification_only_run(
         branch_name=branch_name,
         finalize_skipped_reason=skip_reason,
     )
-    report_path.write_text(report_content, encoding="utf-8")
     benchmark_result = {
         "iteration": 0,
         "decision": "verification_only",
@@ -1337,6 +2551,37 @@ def record_verification_only_run(
         _json_dump(summary_path, payload)
         payload["summary_payload"] = payload.copy()
 
+    knowledge_sync = sync_harness_knowledge(
+        run_id=run_id,
+        source_kind="run",
+        dry_run=False,
+        include_backfill=False,
+        repo_root=repo_root,
+    )
+    summary_compaction = telemetry_block(compact_output("summary", summary, budget_chars=240))
+    report_content += (
+        "\n## Harness Wiki Sync\n\n"
+        f"- updated files: `{len(knowledge_sync.get('updated_paths', []))}`\n"
+        f"{_bullet_block([f'`{path}`' for path in knowledge_sync.get('updated_paths', [])])}\n\n"
+        "## Compaction Telemetry\n\n"
+        f"- summary raw chars: `{summary_compaction['raw_chars']}`\n"
+        f"- summary compact chars: `{summary_compaction['compact_chars']}`\n"
+        f"- summary compaction ratio: `{summary_compaction['compaction_ratio']}`\n"
+        f"- estimated tokens saved: `{summary_compaction['estimated_tokens_saved']}`\n"
+    )
+    report_path.write_text(report_content, encoding="utf-8")
+    report_compaction = telemetry_block(compact_output("report", report_content, budget_chars=600))
+    payload["knowledge_sync"] = knowledge_sync
+    payload["compaction"] = {
+        "summary": summary_compaction,
+        "report": report_compaction,
+    }
+    payload["summary_payload"] = _annotate_summary_with_knowledge_sync(
+        run_id=run_id,
+        knowledge_sync=knowledge_sync,
+        compaction=payload["compaction"],
+    )
+
     append_jsonl(
         run_path / "telemetry.jsonl",
         {
@@ -1351,6 +2596,8 @@ def record_verification_only_run(
             "branch_name": branch_name,
             "report_path": str(report_path),
             "finalize_skipped_reason": skip_reason,
+            "knowledge_sync": knowledge_sync,
+            "compaction": payload["compaction"],
         },
     )
     return payload
@@ -1703,6 +2950,13 @@ def finalize_accepted_meta_loop_run(
         run_id=run_id,
         dry_run=dry_run,
     )
+    knowledge_sync = sync_harness_knowledge(
+        run_id=run_id,
+        source_kind="run",
+        dry_run=dry_run,
+        include_backfill=True,
+        repo_root=repo_root,
+    )
     export_result = export_meta_loop_change(
         run_id,
         objective_component=objective_component,
@@ -1728,6 +2982,24 @@ def finalize_accepted_meta_loop_run(
             export_result=export_result,
             finalize_path=finalize_path,
         )
+    summary_compaction = {
+        "summary": telemetry_block(compact_output("summary", str(summary_payload.get("summary", "")), budget_chars=240))
+    }
+    if dry_run:
+        summary_payload = {
+            **summary_payload,
+            "knowledge_sync": knowledge_sync,
+            "compaction": {
+                **(summary_payload.get("compaction", {}) if isinstance(summary_payload.get("compaction", {}), dict) else {}),
+                **summary_compaction,
+            },
+        }
+    else:
+        summary_payload = _annotate_summary_with_knowledge_sync(
+            run_id=run_id,
+            knowledge_sync=knowledge_sync,
+            compaction=summary_compaction,
+        )
     result = {
         "run_id": run_id,
         "dry_run": dry_run,
@@ -1736,6 +3008,7 @@ def finalize_accepted_meta_loop_run(
         "promotion_report_path": promotion_result["report_path"],
         "promoted_targets": promoted_targets,
         "failure_closure": failure_closure_result,
+        "knowledge_sync": knowledge_sync,
         "export": export_result,
         "summary_path": str(_summary_path(run_id)),
         "summary_payload": summary_payload,

@@ -91,6 +91,7 @@ async def main() -> int:
     assert "name: control-plane-admin" in recipe_text
     assert "finalize_accepted_meta_loop_run" in recipe_text
     assert "inspect_control_plane" in recipe_text
+    assert "search_harness_knowledge" in recipe_text
     assert "describe_harness_component" in recipe_text
     assert "format=markdown" in recipe_text
     assert "record_verification_only_run" in recipe_text

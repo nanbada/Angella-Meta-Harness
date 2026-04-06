@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from output_compactor import compact_output, telemetry_block
+
 
 ANGELLA_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONTROL_PLANE_PATH = ANGELLA_ROOT / ".cache" / "angella" / "control-plane"
@@ -202,6 +204,12 @@ def normalize_harness_metadata(harness_metadata: dict[str, Any] | None) -> dict[
         "resolved_models": resolved_models,
         "env_capability_snapshot": env_snapshot,
         "objective_component": str(source.get("objective_component", "")).strip(),
+        "execution_mode": str(source.get("execution_mode", "")).strip(),
+        "worker_tier": str(source.get("worker_tier", "")).strip(),
+        "fallback_reason": str(source.get("fallback_reason", "")).strip(),
+        "frontier_reachable": _boolish(source.get("frontier_reachable")),
+        "local_cache_enabled": _boolish(source.get("local_cache_enabled")),
+        "token_saver_enabled": _boolish(source.get("token_saver_enabled")),
     }
 
     if source:
@@ -311,6 +319,9 @@ def record_loop_iteration(
         "intent_contract": normalized_intent,
         "harness_metadata": normalized_harness,
         "aux_metrics": aux_metrics,
+        "compaction": {
+            "summary": telemetry_block(compact_output("summary", summary, budget_chars=240)),
+        },
     }
     append_jsonl(run_path / "telemetry.jsonl", telemetry_event)
 
@@ -452,6 +463,9 @@ def write_final_summary(
         "reverted_changes": reverted_changes,
         "failed_changes": failure_changes,
         "aux_metrics": aux_metrics,
+        "compaction": {
+            "summary": telemetry_block(compact_output("summary", summary, budget_chars=240)),
+        },
     }
 
     raw_harness = normalized_harness.get("raw")

@@ -1,0 +1,22 @@
+{
+  "knowledge_policy": {
+    "indexed_paths": [
+      "knowledge",
+      "docs/current-harness-status.md",
+      "docs/setup-installer-architecture.md",
+      "docs/hybrid-harness.md",
+      "docs/promotion-content-quality.md",
+      "PARITY.md"
+    ],
+    "canonical_entrypoints": [
+      "knowledge/index.md",
+      "knowledge/log.md",
+      "knowledge/sources/index.md"
+    ],
+    "search_provider": "builtin",
+    "default_max_results": 5,
+    "snippet_chars": 240,
+    "compaction_budget_chars": 600,
+    "log_tail_entries": 5
+  }
+}

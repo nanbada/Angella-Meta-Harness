@@ -7,12 +7,12 @@
 # 참고: https://github.com/block/goose/blob/main/CUSTOM_DISTROS.md
 # ============================================================
 
-GOOSE_PROVIDER: ollama
-GOOSE_MODEL: gemma4:26b
+GOOSE_PROVIDER: openai
+GOOSE_MODEL: gpt-5.2
 
 # Lead/Worker Harness
-GOOSE_LEAD_PROVIDER: google
-GOOSE_LEAD_MODEL: gemini-2.5-pro
+GOOSE_LEAD_PROVIDER: openai
+GOOSE_LEAD_MODEL: gpt-5.2-pro
 GOOSE_LEAD_TURNS: 3
 
 # Mode

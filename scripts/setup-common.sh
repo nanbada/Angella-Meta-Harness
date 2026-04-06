@@ -69,6 +69,12 @@ ANGELLA_WORKER_TEMPERATURE="${ANGELLA_WORKER_TEMPERATURE:-}"
 ANGELLA_MLX_PREVIEW_ENABLED="${ANGELLA_MLX_PREVIEW_ENABLED:-false}"
 ANGELLA_NVFP4_ENABLED="${ANGELLA_NVFP4_ENABLED:-false}"
 ANGELLA_APFEL_ENABLED="${ANGELLA_APFEL_ENABLED:-false}"
+ANGELLA_EXECUTION_MODE="${ANGELLA_EXECUTION_MODE:-}"
+ANGELLA_WORKER_TIER="${ANGELLA_WORKER_TIER:-}"
+ANGELLA_FALLBACK_REASON="${ANGELLA_FALLBACK_REASON:-}"
+ANGELLA_FRONTIER_REACHABLE="${ANGELLA_FRONTIER_REACHABLE:-true}"
+ANGELLA_LOCAL_CACHE_ENABLED="${ANGELLA_LOCAL_CACHE_ENABLED:-false}"
+ANGELLA_TOKEN_SAVER_ENABLED="${ANGELLA_TOKEN_SAVER_ENABLED:-false}"
 ANGELLA_NON_GOALS_JSON="${ANGELLA_NON_GOALS_JSON:-[]}"
 ANGELLA_MLX_POLICY_JSON="${ANGELLA_MLX_POLICY_JSON:-{}}"
 ANGELLA_INSTALL_RENDERED_HASHES_JSON="${ANGELLA_INSTALL_RENDERED_HASHES_JSON:-{}}"
@@ -236,15 +242,15 @@ render_template() {
     escaped_python="$(escape_sed_replacement "$PYTHON_CMD")"
     escaped_recipe_path="$(escape_sed_replacement "$RENDERED_RECIPE_PATH")"
     escaped_harness_self_optimize_path="$(escape_sed_replacement "$RENDERED_HARNESS_SELF_OPTIMIZE_PATH")"
-    escaped_goose_provider="$(escape_sed_replacement "${ANGELLA_WORKER_PROVIDER:-ollama}")"
-    escaped_goose_model="$(escape_sed_replacement "${ANGELLA_WORKER_MODEL:-gemma4:26b}")"
+    escaped_goose_provider="$(escape_sed_replacement "${ANGELLA_WORKER_PROVIDER:-openai}")"
+    escaped_goose_model="$(escape_sed_replacement "${ANGELLA_WORKER_MODEL:-gpt-5.2}")"
     escaped_goose_temperature="$(escape_sed_replacement "${ANGELLA_WORKER_TEMPERATURE:-0.3}")"
-    escaped_goose_lead_provider="$(escape_sed_replacement "${ANGELLA_LEAD_PROVIDER:-google}")"
-    escaped_goose_lead_model="$(escape_sed_replacement "${ANGELLA_LEAD_MODEL:-gemini-2.5-pro}")"
-    escaped_goose_planner_provider="$(escape_sed_replacement "${ANGELLA_PLANNER_PROVIDER:-${ANGELLA_LEAD_PROVIDER:-google}}")"
-    escaped_goose_planner_model="$(escape_sed_replacement "${ANGELLA_PLANNER_MODEL:-${ANGELLA_LEAD_MODEL:-gemini-2.5-pro}}")"
-    escaped_goose_input_limit="$(escape_sed_replacement "${ANGELLA_WORKER_CONTEXT_LIMIT:-16384}")"
-    escaped_harness_profile="$(escape_sed_replacement "${ANGELLA_HARNESS_PROFILE_ID:-default}")"
+    escaped_goose_lead_provider="$(escape_sed_replacement "${ANGELLA_LEAD_PROVIDER:-openai}")"
+    escaped_goose_lead_model="$(escape_sed_replacement "${ANGELLA_LEAD_MODEL:-gpt-5.2-pro}")"
+    escaped_goose_planner_provider="$(escape_sed_replacement "${ANGELLA_PLANNER_PROVIDER:-${ANGELLA_LEAD_PROVIDER:-openai}}")"
+    escaped_goose_planner_model="$(escape_sed_replacement "${ANGELLA_PLANNER_MODEL:-${ANGELLA_LEAD_MODEL:-gpt-5.2-pro}}")"
+    escaped_goose_input_limit="$(escape_sed_replacement "${ANGELLA_WORKER_CONTEXT_LIMIT:-400000}")"
+    escaped_harness_profile="$(escape_sed_replacement "${ANGELLA_HARNESS_PROFILE_ID:-frontier_default}")"
 
     mkdir -p "$(dirname "$output_path")"
     sed \
@@ -261,6 +267,11 @@ render_template() {
         -e "s|__GOOSE_PLANNER_MODEL__|$escaped_goose_planner_model|g" \
         -e "s|__GOOSE_INPUT_LIMIT__|$escaped_goose_input_limit|g" \
         -e "s|__ANGELLA_HARNESS_PROFILE_ID__|$escaped_harness_profile|g" \
+        -e "s|__ANGELLA_EXECUTION_MODE__|$(escape_sed_replacement "${ANGELLA_EXECUTION_MODE:-frontier_primary}")|g" \
+        -e "s|__ANGELLA_WORKER_TIER__|$(escape_sed_replacement "${ANGELLA_WORKER_TIER:-frontier_primary}")|g" \
+        -e "s|__ANGELLA_FRONTIER_REACHABLE__|$(escape_sed_replacement "${ANGELLA_FRONTIER_REACHABLE:-true}")|g" \
+        -e "s|__ANGELLA_LOCAL_CACHE_ENABLED__|$(escape_sed_replacement "${ANGELLA_LOCAL_CACHE_ENABLED:-false}")|g" \
+        -e "s|__ANGELLA_TOKEN_SAVER_ENABLED__|$(escape_sed_replacement "${ANGELLA_TOKEN_SAVER_ENABLED:-false}")|g" \
         "$template_path" > "$output_path"
 }
 
@@ -357,6 +368,12 @@ write_harness_resolution_snapshot() {
   "mlx_preview_enabled": $(printf '%s' "$ANGELLA_MLX_PREVIEW_ENABLED"),
   "nvfp4_enabled": $(printf '%s' "$ANGELLA_NVFP4_ENABLED"),
   "apfel_enabled": $(printf '%s' "$ANGELLA_APFEL_ENABLED"),
+  "execution_mode": $(printf '%s' "$ANGELLA_EXECUTION_MODE" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "worker_tier": $(printf '%s' "$ANGELLA_WORKER_TIER" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "fallback_reason": $(printf '%s' "$ANGELLA_FALLBACK_REASON" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "frontier_reachable": $(printf '%s' "$ANGELLA_FRONTIER_REACHABLE"),
+  "local_cache_enabled": $(printf '%s' "$ANGELLA_LOCAL_CACHE_ENABLED"),
+  "token_saver_enabled": $(printf '%s' "$ANGELLA_TOKEN_SAVER_ENABLED"),
   "non_goals": ${ANGELLA_NON_GOALS_JSON},
   "mlx_policy": ${ANGELLA_MLX_POLICY_JSON}
 }
@@ -419,6 +436,14 @@ summary_payload = {
         "planner": env("ANGELLA_PLANNER_MODEL_ID"),
         "worker": env("ANGELLA_WORKER_MODEL_ID"),
     },
+    "routing": {
+        "execution_mode": env("ANGELLA_EXECUTION_MODE"),
+        "worker_tier": env("ANGELLA_WORKER_TIER"),
+        "fallback_reason": env("ANGELLA_FALLBACK_REASON"),
+        "frontier_reachable": env("ANGELLA_FRONTIER_REACHABLE", "true").lower() == "true",
+        "local_cache_enabled": env("ANGELLA_LOCAL_CACHE_ENABLED", "false").lower() == "true",
+        "token_saver_enabled": env("ANGELLA_TOKEN_SAVER_ENABLED", "false").lower() == "true",
+    },
     "rendered_hashes": env_json("ANGELLA_INSTALL_RENDERED_HASHES_JSON", {}),
     "preexisting_target_hashes": env_json("ANGELLA_INSTALL_PREEXISTING_HASHES_JSON", {}),
     "applied_target_hashes": env_json("ANGELLA_INSTALL_APPLIED_HASHES_JSON", {}),
@@ -467,6 +492,12 @@ write_bootstrap_state() {
         write_shell_var "ANGELLA_MLX_PREVIEW_ENABLED" "$ANGELLA_MLX_PREVIEW_ENABLED"
         write_shell_var "ANGELLA_NVFP4_ENABLED" "$ANGELLA_NVFP4_ENABLED"
         write_shell_var "ANGELLA_APFEL_ENABLED" "$ANGELLA_APFEL_ENABLED"
+        write_shell_var "ANGELLA_EXECUTION_MODE" "$ANGELLA_EXECUTION_MODE"
+        write_shell_var "ANGELLA_WORKER_TIER" "$ANGELLA_WORKER_TIER"
+        write_shell_var "ANGELLA_FALLBACK_REASON" "$ANGELLA_FALLBACK_REASON"
+        write_shell_var "ANGELLA_FRONTIER_REACHABLE" "$ANGELLA_FRONTIER_REACHABLE"
+        write_shell_var "ANGELLA_LOCAL_CACHE_ENABLED" "$ANGELLA_LOCAL_CACHE_ENABLED"
+        write_shell_var "ANGELLA_TOKEN_SAVER_ENABLED" "$ANGELLA_TOKEN_SAVER_ENABLED"
         write_shell_var "ANGELLA_NON_GOALS_JSON" "$ANGELLA_NON_GOALS_JSON"
         write_shell_var "ANGELLA_MLX_POLICY_JSON" "$ANGELLA_MLX_POLICY_JSON"
         write_shell_var "ANGELLA_INSTALL_RENDERED_HASHES_JSON" "$ANGELLA_INSTALL_RENDERED_HASHES_JSON"
@@ -972,6 +1003,18 @@ report_harness_credential_status() {
             ;;
     esac
 
+    case "$ANGELLA_WORKER_PROVIDER" in
+        google)
+            [ -n "${GOOGLE_API_KEY:-}" ] || missing=1
+            ;;
+        openai)
+            [ -n "${OPENAI_API_KEY:-}" ] || missing=1
+            ;;
+        anthropic)
+            [ -n "${ANTHROPIC_API_KEY:-}" ] || missing=1
+            ;;
+    esac
+
     if [ "$missing" -eq 1 ]; then
         warn "One or more selected lead/planner credentials are missing."
         echo "  Configure later with:"
@@ -1008,10 +1051,15 @@ print_summary() {
     echo "     source $SCRIPT_DIR/.env.mlx"
     echo ""
     echo "  Harness:"
-    echo "     profile: ${ANGELLA_HARNESS_PROFILE_ID:-default}"
-    echo "     lead: ${ANGELLA_LEAD_PROVIDER:-google}/${ANGELLA_LEAD_MODEL:-gemini-2.5-pro}"
-    echo "     planner: ${ANGELLA_PLANNER_PROVIDER:-google}/${ANGELLA_PLANNER_MODEL:-gemini-2.5-pro}"
-    echo "     worker: ${ANGELLA_WORKER_PROVIDER:-ollama}/${ANGELLA_WORKER_MODEL:-gemma4:26b}"
+    echo "     profile: ${ANGELLA_HARNESS_PROFILE_ID:-frontier_default}"
+    echo "     lead: ${ANGELLA_LEAD_PROVIDER:-openai}/${ANGELLA_LEAD_MODEL:-gpt-5.2-pro}"
+    echo "     planner: ${ANGELLA_PLANNER_PROVIDER:-openai}/${ANGELLA_PLANNER_MODEL:-gpt-5.2-pro}"
+    echo "     worker: ${ANGELLA_WORKER_PROVIDER:-openai}/${ANGELLA_WORKER_MODEL:-gpt-5.2}"
+    echo "     mode: ${ANGELLA_EXECUTION_MODE:-frontier_primary}"
+    echo "     worker tier: ${ANGELLA_WORKER_TIER:-frontier_primary}"
+    echo "     fallback reason: ${ANGELLA_FALLBACK_REASON:-none}"
+    echo "     local cache enabled: ${ANGELLA_LOCAL_CACHE_ENABLED:-false}"
+    echo "     token saver enabled: ${ANGELLA_TOKEN_SAVER_ENABLED:-false}"
     echo ""
     if [ "$CHECK_ONLY" = false ] && [ "$BOOTSTRAP_ONLY" = false ] && [ "${ANGELLA_INSTALL_OVERWRITE_MODE:-not_run}" != "not_run" ]; then
         echo "  Install drift:"

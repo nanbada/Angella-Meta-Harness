@@ -1,41 +1,73 @@
-# Hybrid Harness
+# Frontier-First Harness
 
-Angella harness는 `lead + planner + worker` 3역할을 고정 모델이 아니라 catalog/selector 기반으로 결정합니다.
+Angella harness는 `lead + planner + worker` 3역할을 catalog/selector 기반으로 결정합니다.
+
+기본 원칙은 이제 `frontier-first personal agent harness` 입니다.
 
 ## Roles
 
-- lead: 전체 목표 정렬과 최종 판단
-- planner: 계획 생성과 decomposition
-- worker: 실제 local execution/coding/reasoning
+- lead: 최상위 목표 정렬과 최종 판단
+- planner: 계획 생성, decomposition, verification framing
+- worker: 실제 coding/reasoning/execution
 
-## Default pattern
+## Default Pattern
 
-- lead: `best_reasoning_frontier`
-- planner: `best_reasoning_frontier`
-- worker: `best_local_reasoning`
+- lead: 최신 frontier reasoning model
+- planner: 최신 frontier reasoning model
+- worker: 최신 frontier worker model
 
-즉 기본 구조는 “frontier online lead/planner + local MLX worker”입니다.
+즉 기본 구조는 더 이상 `frontier + local worker`가 아니라 `frontier + frontier + frontier` 입니다.
 
-## Worker profiles
+local LLM은 기본 경로가 아니라 아래 2급 계층으로만 사용합니다.
 
-- `default`: frontier lead/planner + Gemma4 local reasoning worker
-- `frontier_low_cost`: 비용 절충형 frontier lead/planner + Gemma4 local reasoning worker
-- `local_reasoning`: frontier lead/planner + gemma reasoning worker
-- `low_latency_apfel`: frontier lead/planner + apfel low-latency worker
-- `preview_nvfp4`: frontier lead/planner + preview-only worker slot
+- fallback: privacy, token, network, connectivity 제약 시 대체 worker
+- augment: prefilter, local review, compact retrieval, private knowledge assist
+- cache: 반복 검색/압축/로컬 knowledge 작업용 보조 계층
 
-## Selection model
+## Canonical Profiles
 
-모델은 이름으로 직접 박히지 않고 selector policy로 선택됩니다.
+- `frontier_default`
+  - 기본값
+  - frontier lead/planner + cost-guarded frontier worker
+- `frontier_quality`
+  - 최고 성능 우선
+  - frontier lead/planner/worker 모두 최고 reasoning 우선
+- `frontier_cost_guarded`
+  - frontier 품질을 유지하면서 비용 guard 적용
+- `frontier_private_fallback`
+  - 기본은 frontier
+  - privacy/token/network 제약이 명시되면 local fallback worker 허용
+- `local_lab`
+  - 연구용
+  - 기본값 아님
+- `frontier_token_saver_lab`
+  - frontier 기본 경로
 
-- `best_reasoning_frontier`
-- `best_reasoning_frontier_low_cost`
-- `best_local_low_latency`
-- `best_local_reasoning`
-- `best_local_preview`
+## Routing Metadata
 
-새로운 더 강한 lead/planner 모델이 생기면 catalog score만 갱신하면 되고, installer는 같은 profile id를 유지한 채 새 모델을 자동 선택할 수 있습니다. preview profile은 preview-flag worker가 catalog에 존재할 때만 활성화됩니다.
+current-selection과 control-plane metadata에는 아래가 기록됩니다.
 
-## Preview Reintroduction
+- `execution_mode`
+- `worker_tier`
+- `fallback_reason`
+- `frontier_reachable`
+- `local_cache_enabled`
+- `token_saver_enabled`
 
-preview worker를 다시 넣을 때는 [`preview-worker-reintroduction.md`](/Users/nanbada/projects/Angella/docs/preview-worker-reintroduction.md) 의 gating, selector, 테스트 조건을 먼저 충족해야 합니다.
+## Migration Policy
+
+이전 local-first profile naming은 canonical path에서 제거되었습니다.
+
+- removed: `default`
+- removed: `frontier_low_cost`
+- removed: `local_reasoning`
+- removed: `low_latency_apfel`
+- removed: `preview_nvfp4`
+
+old profile id를 만나면 silent fallback 없이 새 profile 안내와 함께 실패해야 합니다.
+
+## Optional Experimental Slots
+
+- `qmd`
+  - optional search provider
+  - builtin SQLite search가 기본

@@ -143,6 +143,7 @@ def main() -> int:
         assert len(summary_payload["benchmark_results"]) == 2
         assert summary_payload["reverted_changes"][0]["candidate_commit"] == "def456"
         assert "threshold_not_met" in summary_payload["failure_causes"]
+        assert summary_payload["compaction"]["summary"]["raw_chars"] >= summary_payload["compaction"]["summary"]["compact_chars"]
 
     print("control plane logging tests passed")
     return 0
