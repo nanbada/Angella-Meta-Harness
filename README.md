@@ -62,11 +62,18 @@ bash setup.sh --yes
 ### 3. 환경 변수 적용
 
 ```bash
+bash scripts/setup-vault.sh
+```
+
+다중 Frontier 모델(Google, Anthropic, OpenAI)의 API Key를 안전하게 로드하기 위해 위 터미널 명령을 수행하면 `.env.agents` 파일이 생성됩니다(Git 추적에서 자동 제외됩니다).
+
+기존 MLX 전용 설정이 필요하다면:
+```bash
 cp .env.mlx.example .env.mlx
 source .env.mlx
 ```
 
-`.env.mlx.example`는 커밋되는 예시 파일이고, 실제 로컬 환경 파일은 `.env.mlx`로 두고 git에는 올리지 않습니다. 이 파일은 `ANGELLA_ROOT`와 `OBSIDIAN_VAULT_PATH`를 결정적으로 설정합니다. 별도 override가 없으면 로그는 Angella 설치 경로 하위 `logs/`에 저장됩니다.
+`.env.mlx.example`는 커밋되는 예시 파일이고, 실제 로컬 환경 파일은 `.env.mlx` 및 `.env.agents`로 두고 git에는 올리지 않습니다. 이 파일은 `ANGELLA_ROOT`와 `OBSIDIAN_VAULT_PATH`를 결정적으로 설정합니다. 별도 override가 없으면 로그는 Angella 설치 경로 하위 `logs/`에 저장됩니다.
 
 Repo-local cache paths:
 
@@ -117,10 +124,16 @@ goose configure
 
 또는 셸에서 미리 export 합니다.
 
-### 5. Autoresearch loop 실행
+### 5. 루프 실행 (Autoresearch / Personal Agent)
 
+개발 코드 최적화 중심의 래칫 루프(Ratchet Loop):
 ```bash
 goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s
+```
+
+개인용 AI 비서 중심의 OS 제어 및 LLM-Wiki 루프:
+```bash
+goose run --recipe ~/.config/goose/recipes/personal-agent-loop.yaml -s
 ```
 
 Harness self-optimize recipe도 설치 후 바로 사용할 수 있습니다.
@@ -129,7 +142,7 @@ Harness self-optimize recipe도 설치 후 바로 사용할 수 있습니다.
 goose run --recipe ~/.config/goose/recipes/harness-self-optimize.yaml -s
 ```
 
-입력 파라미터:
+입력 파라미터(Self-optimize 기준):
 
 - `target_project_path`: 최적화할 프로젝트의 절대 경로
 - `objective_metric`: `build_time`, `tokens_per_second`, `latency_ms`, `bundle_size`
@@ -303,6 +316,7 @@ Canonical frontier-first profiles:
 - `frontier_private_fallback`
 - `local_lab`
 - `frontier_token_saver_lab`
+- `personal_agent_tier` (Multi-tier OS Personal Agent)
 
 Removed canonical profiles:
 
@@ -364,10 +378,12 @@ Angella/
 │   ├── setup-common.sh
 │   ├── setup-bootstrap.sh
 │   ├── setup-install.sh
+│   ├── setup-vault.sh
 │   ├── validate_harness_schema.py
 │   └── test_setup_flows.sh
 ├── recipes/
 │   ├── autoresearch-loop.yaml
+│   ├── personal-agent-loop.yaml
 │   ├── harness-self-optimize.yaml
 │   └── sub/
 │       ├── code-optimize.yaml
@@ -380,6 +396,7 @@ Angella/
 │   ├── metric_benchmark_swift.py
 │   ├── obsidian_auto_log.py
 │   ├── output_compactor.py
+│   ├── personal_context_ops.py
 │   ├── shell_router.py
 │   └── requirements.txt
 ├── .github/workflows/

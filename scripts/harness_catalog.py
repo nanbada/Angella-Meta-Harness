@@ -117,6 +117,13 @@ def selector_sort_key(selector: str, model: dict):
             model["stability_score"],
             model["priority"],
         )
+    if selector == "best_coding_frontier":
+        return (
+            model["tool_use_score"],
+            model["reasoning_score"],
+            model["latency_score"],
+            model["priority"],
+        )
     if selector == "best_reasoning_frontier_low_cost":
         return (
             model["reasoning_score"],
@@ -147,7 +154,7 @@ def selector_sort_key(selector: str, model: dict):
 
 
 def selector_candidates(selector: str, models: list[dict], role: str) -> list[dict]:
-    if selector.startswith("best_reasoning_frontier"):
+    if selector.startswith("best_reasoning_frontier") or selector.startswith("best_coding_frontier"):
         return [m for m in models if role in m["role_support"] and m["provider"] in FRONTIER_PROVIDERS]
     if selector == "best_local_low_latency":
         return [m for m in models if role in m["role_support"] and "low_latency" in m.get("flags", [])]

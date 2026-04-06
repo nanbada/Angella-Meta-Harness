@@ -254,6 +254,18 @@ setup, config, benchmark, logging, reporting을 제품 기능으로 취급한다
 
 - 기본 경로를 깨지 않고 provider 실험 가능
 
+### Phase 6. Personal Agent & LLM-Wiki 통함 (현재 단계)
+
+목표는 RAG 기반을 탈피하여 LLM 스스로 위키를 관리하는 OS 개인비서로의 확장이다.
+
+- LLM-Wiki (`knowledge/raw/` vs `knowledge/wiki/` 레이어 분리) 적용
+- 데스크톱 통합을 위한 Personal Context MCP (`read_clipboard`, `ingest_to_raw`)
+- 통합 시크릿 Vault (`.env.agents`) 격리
+
+완료 기준:
+
+- 새로운 Personal Recipe 실행 시 LLM이 스스로 Context를 ingest하고 위키에 구조화된 기록을 남김.
+
 ## 11. 우선순위 백로그
 
 ### P0

@@ -26,3 +26,4 @@ config/Modelfile.*.local
 
 # Local reference notes
 reference.md
+.env.agents

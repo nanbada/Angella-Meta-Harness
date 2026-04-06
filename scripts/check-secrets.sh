@@ -19,6 +19,8 @@ if command -v rg >/dev/null 2>&1; then
     --glob '!*.pyc' \
     --glob '!*.example' \
     --glob '!.env.mlx' \
+    --glob '!.env.agents' \
+    --glob '!scripts/setup-vault.sh' \
     --glob '!*.sample' \
     --glob '!*.md' \
     "$PATTERN" . >"$TMP_MATCHES" || true
@@ -32,6 +34,8 @@ else
     --exclude='*.pyc' \
     --exclude='*.example' \
     --exclude='.env.mlx' \
+    --exclude='.env.agents' \
+    --exclude='setup-vault.sh' \
     --exclude='*.sample' \
     --exclude='*.md' \
     "$PATTERN" . >"$TMP_MATCHES" || true

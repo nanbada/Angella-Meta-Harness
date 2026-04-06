@@ -1,0 +1,44 @@
+version: 1.0.0
+title: Personal AI Agent Loop (Multi-Tier)
+description: |
+  A self-improving personal agent loop that manages OS-level tasks,
+  maintains long-term memory via the knowledge base, and roots
+  its cognition using Gemini, Claude, Codex, and local Gemma 4.
+instructions: |
+  1. Intent Analysis: Deeply understand the user's daily goals or OS requests. Keep user interaction concise.
+  2. LLM-Wiki Operations: 
+     - **Query:** ALWAYS read `knowledge/wiki/index.md` first before making decisions.
+     - **Ingest:** Use `personal_context_ops` to copy external files or clipboard into `knowledge/raw/` first. Then extract insights and synthesize them into `knowledge/wiki/` as markdown pages.
+     - **Lint:** Periodically check the wiki for orphan pages, contradictory facts, and broken links.
+  3. Execution: Dispatch tools. Prefer fallback to `mlx_gemma4_31b_it_4bit` if the context contains purely local/offline operations.
+  4. Memory Compaction: At the end of the execution, use `output_compactor` to distill the execution logs, and heavily rely on updating the `knowledge/wiki/log.md` with a `## [YYYY-MM-DD HH:MM] action | Subject` entry.
+  5. Final Report: Present a summary of what was accomplished and whether the Wiki was updated.
+extensions:
+  - type: builtin
+    name: developer
+  - type: stdio
+    name: meta_loop_ops
+    cmd: python3
+    args: ["/opt/goose-mcp/meta_loop_ops.py"]
+  - type: stdio
+    name: output_compactor
+    cmd: python3
+    args: ["/opt/goose-mcp/output_compactor.py"]
+  - type: stdio
+    name: personal_context_ops
+    cmd: python3
+    args: ["/opt/goose-mcp/personal_context_ops.py"]
+settings:
+  GOOSE_LEAD_TURNS: 5
+  GOOSE_LEAD_FAILURE_THRESHOLD: 3
+  MAX_ITERATIONS: 10
+  OBJECTIVE_METRIC: "task_completion_rate"
+parameters:
+  - name: os_context
+    type: string
+    description: Current specific OS context or path the user is working inside (optional)
+    required: false
+activities:
+  - "오늘 캘린더 일정을 스캔하고 중요한 프로젝트 노트를 요약해줘."
+  - "로컬 KnowledgeBase를 분석해서 어제 실패한 코드 패턴을 SOP로 등록해줘."
+  - "이 로컬 폴더들을 정리하고, 결과를 압축된 로그로 만들어줘."

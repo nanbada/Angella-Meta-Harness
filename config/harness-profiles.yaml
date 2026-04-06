@@ -75,11 +75,26 @@
       "execution_mode": "local_lab",
       "worker_tier_default": "local_augment",
       "local_cache_enabled": true,
+      "token_saver_enabled": false
+    },
+    {
+      "id": "personal_agent_tier",
+      "display_name": "Personal Agent (Multi-Tier)",
+      "lead_selector": "best_reasoning_frontier",
+      "planner_selector": "best_reasoning_frontier",
+      "worker_selector": "best_coding_frontier",
+      "fallback_worker_selector": "best_local_fallback",
+      "execution_mode": "personal_hybrid",
+      "worker_tier_default": "hybrid",
+      "local_cache_enabled": true,
       "token_saver_enabled": false,
+      "fallback_when_any": [
+        "local_context_needed",
+        "private_mode"
+      ],
       "non_goals": [
-        "Treat this research profile as the default operating mode"
+        "Relying solely on one provider for all cognitive tasks"
       ]
-
     }
   ]
 }

@@ -89,3 +89,10 @@ Last updated: 2026-04-06
 - Status: implemented
 - Evidence: `mcp-servers/meta_loop_ops.py`
 - Evidence: `scripts/test_harness_knowledge.py`
+
+## Lane 14 — LLM-Wiki & OS Personal Agent Path
+
+- Status: implemented
+- Evidence: `recipes/personal-agent-loop.yaml`
+- Evidence: `knowledge/wiki/schema.md`
+- Evidence: `mcp-servers/personal_context_ops.py`

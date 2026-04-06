@@ -51,11 +51,9 @@ This file is a handoff snapshot for the next work session.
 - `mlx-community/gemma-4-31b-it-4bit` (optimal local setting for M3 Pro 36GB) is added to `harness-models.yaml` as the `mlx_gemma4_31b_it_4bit` model tier
 - experimental `rtk` (Run-Time Kit) module and `frontier_token_saver_lab` profile were completely removed to prevent metric-swallowing bugs
 - `bash setup.sh --install-only --yes` now overwrites stale Goose config deterministically
-- install drift summary is written to `.cache/angella/control-plane/install/summary.json`
-- `harness-self-optimize` should call `inspect_control_plane(format=markdown)` and `describe_harness_component` before broader exploration
-- `harness-self-optimize` should read matching tracked `knowledge/sops/` or `knowledge/skills/` before broader exploration when a related failure type or worker pattern already exists
-- `harness-self-optimize` should call `search_harness_knowledge` immediately after control-plane inspection and fall back to `knowledge/index.md` / `knowledge/log.md` when search is empty
-- `scripts/harness_catalog.py` now needs to stay compatible with `/usr/bin/python3` on macOS because `setup-check` can execute under Python 3.9
+- **New Personal Agent Arcitecture integrated:** Added `personal_agent_tier` profile connecting multiple models via `scripts/setup-vault.sh`.
+- **LLM-Wiki implementation:** Repurposed `knowledge/` into an automated LLM-Wiki using Karpathy's compounding knowledge logic (`raw/`, `wiki/`, `index.md`, `log.md`).
+- `mcp-servers/personal_context_ops.py` added for OS interaction and clipboard access.
 
 ## Merge readiness checklist
 
