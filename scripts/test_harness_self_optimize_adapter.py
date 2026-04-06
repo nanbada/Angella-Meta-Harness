@@ -94,6 +94,8 @@ async def main() -> int:
     assert "describe_harness_component" in recipe_text
     assert "format=markdown" in recipe_text
     assert "record_verification_only_run" in recipe_text
+    assert "knowledge/sops/" in recipe_text
+    assert "knowledge/skills/" in recipe_text
 
     print("harness self-optimize adapter tests passed")
     return 0

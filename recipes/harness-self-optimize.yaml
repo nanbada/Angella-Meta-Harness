@@ -74,8 +74,9 @@ instructions: |
      - 가능하면 `format=markdown` 으로 읽고 recent accepted runs, verification-only runs, open failures, pending drafts, retention 상태를 먼저 요약합니다.
   2. `control-plane-admin.describe_harness_component`
      - `benchmark_command`, `binary_acceptance_checks`, `success_signal`, `priority_files`, `allowed_fix_surface` 를 가져옵니다.
-  3. priority files와 관련 open failure / recent summary만 읽습니다.
+  3. priority files와 관련 open failure / recent summary / matching knowledge만 읽습니다.
      - priority files 밖 경로는 기본적으로 읽지 않습니다.
+     - 관련 failure type 이나 selected worker model에 대응하는 `knowledge/sops/` 또는 `knowledge/skills/` 파일이 있으면 먼저 읽고, 없으면 없다고 명시합니다.
      - repo root 전체에 대한 `tree` 또는 `analyze` 호출은 금지합니다.
   4. ideal state를 8~12단어로 고정하고 objective metric + binary acceptance checks를 명시합니다.
   5. benchmark를 먼저 실행해 현재 상태를 확인합니다.

@@ -182,6 +182,15 @@ def main() -> int:
             control_plane / "failures" / "closed" / "failure-two.json",
             {"failure_type": "threshold_not_met"},
         )
+        closure_candidate = control_plane / "failures" / "open" / "angella-meta-run-threshold-not-met.json"
+        _write_json(
+            closure_candidate,
+            {
+                "failure_type": "threshold_not_met",
+                "source_run_id": run_id,
+                "component": "setup-check",
+            },
+        )
 
         dry_run_drafts = generate_knowledge_drafts_from_run(
             run_id,
@@ -246,9 +255,15 @@ def main() -> int:
         assert result["export"]["branch_name"].startswith("codex/")
         assert result["export"]["pr_url"] == "https://example.com/pr/123"
         assert Path(result["finalize_path"]).is_file()
+        assert result["failure_closure"]["closed"]
+        closed_failure = result["failure_closure"]["closed"][0]
+        assert closed_failure["failure_type"] == "threshold_not_met"
+        assert not closure_candidate.exists()
+        assert Path(closed_failure["to_path"]).is_file()
         summary_payload = json.loads(Path(result["summary_path"]).read_text(encoding="utf-8"))
         assert summary_payload["export"]["pr_url"] == "https://example.com/pr/123"
         assert summary_payload["promotion"]["promoted"]
+        assert summary_payload["failure_closure"]["closed"]
         assert "Meta-loop export: branch=" in summary_payload["summary"]
         assert sop_content.count("Accepted Run Addendum - `angella-meta-run`") == 1
 
@@ -407,6 +422,39 @@ def main() -> int:
         assert verification_payload["report_path"] == str(verification_report)
         assert verification_payload["finalize_skipped_reason"]
         assert verification_payload["metric_value"] == 0.42
+        assert verification_payload["objective_component"] == "recipe-runtime"
+        assert verification_payload["harness_metadata"]["objective_component"] == "recipe-runtime"
+
+        _write_json(
+            control_plane / "runs" / "verification-updated-run" / "summary.json",
+            {
+                "run_id": "verification-updated-run",
+                "summary": "Previous baseline summary.",
+                "benchmark_results": [{"decision": "baseline", "metric_key": "build_time", "metric_value": 1.0}],
+            },
+        )
+        verification_updated = record_verification_only_run(
+            run_id="verification-updated-run",
+            objective_component="setup-check",
+            benchmark_command="bash setup.sh --check",
+            metric_key="build_time",
+            metric_value=0.61,
+            summary="Verification-only setup check passed after reread.",
+            working_directory=str(repo),
+            branch_name="angella/run-verification-update",
+        )
+        updated_payload = _read_json(Path(verification_updated["summary_path"]))
+        assert updated_payload["objective_component"] == "setup-check"
+        assert updated_payload["harness_metadata"]["objective_component"] == "setup-check"
+
+        updated_inspection = inspect_control_plane(
+            run_limit=10,
+            failure_limit=5,
+            draft_limit=5,
+            queue_limit=5,
+            format="markdown",
+        )
+        assert "(`setup-check`)" in updated_inspection["content"]
 
         for component_name in ("setup-check", "profile-resolution", "recipe-runtime"):
             component = harness_component_context(component_name)

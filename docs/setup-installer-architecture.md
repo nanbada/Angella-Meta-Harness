@@ -101,7 +101,7 @@ Recipe/runtime logging now normalizes the control-plane payloads instead of writ
 - `runs/<run_id>/telemetry.jsonl`
   - appends structured loop iteration events with normalized intent and harness metadata
 - `runs/<run_id>/summary.json`
-  - records selected model ids, resolved provider/model names, env capability snapshot, benchmark history, failure causes, kept changes, and reverted changes
+  - records selected model ids, resolved provider/model names, env capability snapshot, benchmark history, failure causes, kept changes, reverted changes, and verification-only objective metadata
 - `runs/<run_id>/report.md`
   - verification-only runs always write a human-readable markdown report with benchmark outcome and finalize skip reason
 - `failures/open/*.json`
@@ -119,6 +119,7 @@ Accepted-run finalization now does all of the following in one flow:
 - promote those drafts into tracked `knowledge/` files when the promotion rule is satisfied
 - merge into an existing tracked knowledge file by appending a run-scoped addendum instead of skipping immediately
 - dedupe repeated addendum content by fingerprint and repeated bullet lines
+- close matching `failures/open/*.json` artifacts for the accepted run by moving them into `failures/closed/`
 - annotate `summary.json` with promotion/export/finalization metadata
 - prune stale draft and queue artifacts through the control-plane admin tool
 
@@ -146,6 +147,11 @@ Component-scoped guidance is also available through the control-plane admin tool
 - success signal
 - allowed fix surface
 - priority file list to keep live self-optimize runs from exploring the whole repo
+
+The self-optimize recipe should also read matching tracked knowledge before broader exploration:
+
+- related `knowledge/sops/` entries for repeated failure types
+- related `knowledge/skills/` entries for the currently selected worker model
 
 When `dry_run=true`, draft generation, promotion, branch export, and queue writes are treated as no-op previews and must not mutate tracked files or control-plane draft state.
 

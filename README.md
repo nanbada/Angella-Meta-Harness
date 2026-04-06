@@ -230,6 +230,7 @@ Accepted harness meta-loop run은 다음을 자동으로 수행할 수 있습니
 - SOP/skill draft 생성
 - promotion rule 충족 시 tracked `knowledge/` 로 승격
 - 기존 tracked knowledge 파일이 있으면 run-scoped addendum merge
+- 같은 accepted run이 만든 open failure artifact는 `failures/closed/` 로 정리
 - `codex/` 브랜치 push + draft PR 생성
 - stale draft / queue artifact 정리
 - inspection tool로 recent runs / failures / drafts / queue 상태 조회
@@ -237,6 +238,9 @@ Accepted harness meta-loop run은 다음을 자동으로 수행할 수 있습니
 - component description tool로 benchmark command / acceptance checks / priority files 조회
 
 verification-only run은 `report.md` 와 `summary.json` 만 남기고 finalize/export/promotion 을 실행하지 않습니다.
+
+- verification-only summary에는 `objective_component` 가 유지되어 inspection에서 component가 사라지지 않습니다
+- self-optimize recipe는 관련 failure type 또는 worker pattern에 대응하는 tracked `knowledge/sops/`, `knowledge/skills/` 를 먼저 읽고 없으면 없다고 명시합니다
 
 `dry_run=true` 경로는 preview 전용이며 draft 파일, queue entry, branch 상태를 실제로 바꾸지 않습니다.
 

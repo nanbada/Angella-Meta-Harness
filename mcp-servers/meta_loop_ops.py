@@ -515,9 +515,9 @@ def _build_skill_body(
 
 def _run_entry(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
     harness_metadata = payload.get("harness_metadata", {})
-    objective_component = ""
+    objective_component = str(payload.get("objective_component", "")).strip()
     if isinstance(harness_metadata, dict):
-        objective_component = str(harness_metadata.get("objective_component", "")).strip()
+        objective_component = str(harness_metadata.get("objective_component", "")).strip() or objective_component
     return {
         "run_id": payload.get("run_id", path.parent.name),
         "summary_path": str(path),
@@ -992,10 +992,56 @@ def promote_knowledge_drafts(
     return report
 
 
+def _close_open_failures_for_run(
+    *,
+    run_id: str,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    layout = ensure_control_plane_layout()
+    open_root = Path(layout["failures_open"])
+    closed_root = Path(layout["failures_closed"])
+    closed: list[dict[str, Any]] = []
+
+    for path in sorted(open_root.glob("*.json")):
+        try:
+            payload = _json_load(path)
+        except Exception:
+            continue
+        if str(payload.get("source_run_id", "")).strip() != run_id:
+            continue
+
+        closed_path = closed_root / path.name
+        if closed_path.exists():
+            closed_path = closed_root / f"{path.stem}-{_now_timestamp()}.json"
+
+        closed_payload = dict(payload)
+        closed_payload["status"] = "closed"
+        closed_payload["closed_by_run_id"] = run_id
+        closed_payload["closed_at"] = _now_timestamp()
+        if not dry_run:
+            _json_dump(closed_path, closed_payload)
+            path.unlink()
+        closed.append(
+            {
+                "from_path": str(path),
+                "to_path": str(closed_path),
+                "failure_type": closed_payload.get("failure_type", ""),
+            }
+        )
+
+    return {
+        "run_id": run_id,
+        "dry_run": dry_run,
+        "side_effects_applied": not dry_run,
+        "closed": closed,
+    }
+
+
 def _annotate_run_summary_with_finalize(
     *,
     run_id: str,
     promotion_result: dict[str, Any],
+    failure_closure_result: dict[str, Any],
     export_result: dict[str, Any],
     finalize_path: Path,
 ) -> dict[str, Any]:
@@ -1008,6 +1054,7 @@ def _annotate_run_summary_with_finalize(
         "promoted": promotion_result.get("promoted", []),
         "skipped": promotion_result.get("skipped", []),
     }
+    summary_payload["failure_closure"] = failure_closure_result
     summary_payload["export"] = export_result
     summary_payload["finalization"] = {
         "finalized_at": finalized_at,
@@ -1032,6 +1079,7 @@ def _annotate_run_summary_with_finalize(
             "timestamp": finalized_at,
             "run_id": run_id,
             "promotion": summary_payload["promotion"],
+            "failure_closure": failure_closure_result,
             "export": export_result,
             "finalization": summary_payload["finalization"],
         },
@@ -1246,6 +1294,7 @@ def record_verification_only_run(
         "summary": summary,
         "working_directory": working_directory,
         "branch_name": branch_name,
+        "harness_metadata": {"objective_component": objective_component} if objective_component else {},
         "report_path": str(report_path),
         "finalize_skipped_reason": skip_reason,
         "benchmark_results": [benchmark_result],
@@ -1256,6 +1305,7 @@ def record_verification_only_run(
         existing = _json_load(summary_path)
         existing["run_kind"] = "verification_only"
         existing["verification_only"] = True
+        existing["objective_component"] = objective_component
         existing["summary"] = summary
         existing["benchmark_command"] = benchmark_command
         existing["metric_key"] = metric_key
@@ -1266,6 +1316,13 @@ def record_verification_only_run(
         existing["verification_recorded_at"] = recorded_at
         existing["report_path"] = str(report_path)
         existing["finalize_skipped_reason"] = skip_reason
+        harness_metadata = existing.get("harness_metadata")
+        if not isinstance(harness_metadata, dict):
+            harness_metadata = {}
+        if objective_component:
+            harness_metadata["objective_component"] = objective_component
+        if harness_metadata:
+            existing["harness_metadata"] = harness_metadata
         benchmark_results = existing.get("benchmark_results")
         if not isinstance(benchmark_results, list):
             benchmark_results = []
@@ -1642,6 +1699,10 @@ def finalize_accepted_meta_loop_run(
         repo_root=repo_root,
     )
     promoted_targets = [item["target_path"] for item in promotion_result.get("promoted", [])]
+    failure_closure_result = _close_open_failures_for_run(
+        run_id=run_id,
+        dry_run=dry_run,
+    )
     export_result = export_meta_loop_change(
         run_id,
         objective_component=objective_component,
@@ -1663,6 +1724,7 @@ def finalize_accepted_meta_loop_run(
         summary_payload = _annotate_run_summary_with_finalize(
             run_id=run_id,
             promotion_result=promotion_result,
+            failure_closure_result=failure_closure_result,
             export_result=export_result,
             finalize_path=finalize_path,
         )
@@ -1673,6 +1735,7 @@ def finalize_accepted_meta_loop_run(
         "drafts_created": draft_result["drafts_created"],
         "promotion_report_path": promotion_result["report_path"],
         "promoted_targets": promoted_targets,
+        "failure_closure": failure_closure_result,
         "export": export_result,
         "summary_path": str(_summary_path(run_id)),
         "summary_payload": summary_payload,

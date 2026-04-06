@@ -35,7 +35,9 @@ This file is a handoff snapshot for the next work session.
 ## Verified paths
 
 - verification-only live self-optimize run records both `summary.json` and `report.md` and does not force finalize
+- verification-only summary updates now preserve `objective_component`, so inspection no longer collapses those runs to `unspecified`
 - accepted run finalize creates knowledge promotion artifacts, summary annotations, export branch, and draft PR
+- accepted run finalize now also closes matching `failures/open/*.json` artifacts for the same `source_run_id`
 - live `setup-yes-warm` bug reproduction and accepted fix are proven by PR #8
 - `setup-check`, `profile-resolution`, and `recipe-runtime` all reached benchmark execution and exited cleanly through verification-only live runs
 
@@ -45,6 +47,7 @@ This file is a handoff snapshot for the next work session.
 - `bash setup.sh --install-only --yes` now overwrites stale Goose config deterministically
 - install drift summary is written to `.cache/angella/control-plane/install/summary.json`
 - `harness-self-optimize` should call `inspect_control_plane(format=markdown)` and `describe_harness_component` before broader exploration
+- `harness-self-optimize` should read matching tracked `knowledge/sops/` or `knowledge/skills/` before broader exploration when a related failure type or worker pattern already exists
 - `scripts/harness_catalog.py` now needs to stay compatible with `/usr/bin/python3` on macOS because `setup-check` can execute under Python 3.9
 
 ## Merge readiness checklist
@@ -59,6 +62,7 @@ This file is a handoff snapshot for the next work session.
 
 ## Next likely tasks
 
+- backfeed promoted knowledge from proof/reference branches into the merge-target branch so accepted learning is reused without manual copy
 - secure an accepted live patch-producing proof for `profile-resolution` or `recipe-runtime`
 - decide whether to keep the latest verification-only run artifacts as reference notes in PR #6
 - merge PR #6 after review, then leave PR #7 and PR #8 as archived proof/reference branches
