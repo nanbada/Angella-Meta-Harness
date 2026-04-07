@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
+import sys
 from collections import OrderedDict
 from typing import Any
 
@@ -148,3 +150,59 @@ def telemetry_block(compacted: dict[str, Any]) -> dict[str, Any]:
         "compaction_ratio": compacted.get("compaction_ratio", 1.0),
         "estimated_tokens_saved": compacted.get("estimated_tokens_saved", 0),
     }
+
+
+def handle_request(request: dict) -> dict:
+    if request.get("type") != "call_tool":
+        return {"error": "Only call_tool requests are supported."}
+
+    tool = request.get("name")
+    args = request.get("arguments", {})
+
+    if tool == "compact_output_text":
+        kind = args.get("kind", "summary")
+        text = args.get("text", "")
+        budget_chars = args.get("budget_chars", 600)
+        
+        try:
+            result = compact_output(kind=kind, text=text, budget_chars=budget_chars)
+            formatted_output = f"Compacted Text:\\n{result['text']}\\n\\n[Telemetry: Raw {result['raw_chars']} chars -\u003e Compact {result['compact_chars']} chars. Ratio: {result['compaction_ratio']}. Saved tokens ~{result['estimated_tokens_saved']}]"
+            return {"content": [{"type": "text", "text": formatted_output}]}
+        except Exception as e:
+            return {"error": str(e)}
+            
+    return {"error": f"Unknown tool: {tool}"}
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--describe":
+        print(json.dumps({
+            "tools": [
+                {
+                    "name": "compact_output_text",
+                    "description": "Deterministically compacts text outputs (e.g., git status, grep search, terminal outputs) to drastically save tokens by removing noise, failures, and duplicates.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"type": "string", "description": "Type of output: 'summary', 'test_output', 'benchmark_output', 'git_status', 'rg', or 'ls_find'."},
+                            "text": {"type": "string", "description": "The raw text dump to compact."},
+                            "budget_chars": {"type": "integer", "description": "Max character budget for the compacted text. Defaults to 600."}
+                        },
+                        "required": ["kind", "text"]
+                    }
+                }
+            ]
+        }))
+        sys.exit(0)
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+            res = handle_request(req)
+            print(json.dumps(res), flush=True)
+        except Exception as e:
+            print(json.dumps({"error": str(e)}), flush=True)
+

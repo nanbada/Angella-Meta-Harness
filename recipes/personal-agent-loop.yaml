@@ -7,19 +7,15 @@ description: |
 instructions: |
   1. Intent Analysis: Deeply understand the user's daily goals or OS requests. Keep user interaction concise.
   2. LLM-Wiki Operations: 
-     - **Query:** ALWAYS read `knowledge/wiki/index.md` first before making decisions.
-     - **Ingest:** Use `personal_context_ops` to copy external files or clipboard into `knowledge/raw/` first. Then extract insights and synthesize them into `knowledge/wiki/` as markdown pages.
-     - **Lint:** Periodically check the wiki for orphan pages, contradictory facts, and broken links.
+     - **Ingest:** Use `llmwiki_ingest` to download URLs or import files into `knowledge/sources/`.
+     - **Compile:** Run `llmwiki_compile` after ingesting or when knowledge is updated.
+     - **Query:** ALWAYS use `llmwiki_query` (with `save=true` if appropriate) to read from the wiki before making decisions.
   3. Execution: Dispatch tools. Prefer fallback to `mlx_gemma4_31b_it_4bit` if the context contains purely local/offline operations.
-  4. Memory Compaction: At the end of the execution, use `output_compactor` to distill the execution logs, and heavily rely on updating the `knowledge/wiki/log.md` with a `## [YYYY-MM-DD HH:MM] action | Subject` entry.
+  4. Memory Compaction: At the end of the execution, use `output_compactor` to distill the execution logs.
   5. Final Report: Present a summary of what was accomplished and whether the Wiki was updated.
 extensions:
   - type: builtin
     name: developer
-  - type: stdio
-    name: meta_loop_ops
-    cmd: python3
-    args: ["/opt/goose-mcp/meta_loop_ops.py"]
   - type: stdio
     name: output_compactor
     cmd: python3
@@ -28,6 +24,10 @@ extensions:
     name: personal_context_ops
     cmd: python3
     args: ["/opt/goose-mcp/personal_context_ops.py"]
+  - type: stdio
+    name: llmwiki_compiler_ops
+    cmd: python3
+    args: ["/opt/goose-mcp/llmwiki_compiler_ops.py"]
 settings:
   GOOSE_LEAD_TURNS: 5
   GOOSE_LEAD_FAILURE_THRESHOLD: 3

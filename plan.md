@@ -254,17 +254,18 @@ setup, config, benchmark, logging, reporting을 제품 기능으로 취급한다
 
 - 기본 경로를 깨지 않고 provider 실험 가능
 
-### Phase 6. Personal Agent & LLM-Wiki 통함 (현재 단계)
+### Phase 6. Personal Agent & LLM-Wiki 통합 (완료)
 
 목표는 RAG 기반을 탈피하여 LLM 스스로 위키를 관리하는 OS 개인비서로의 확장이다.
 
-- LLM-Wiki (`knowledge/raw/` vs `knowledge/wiki/` 레이어 분리) 적용
-- 데스크톱 통합을 위한 Personal Context MCP (`read_clipboard`, `ingest_to_raw`)
-- 통합 시크릿 Vault (`.env.agents`) 격리
+- LLM-Wiki (`knowledge/raw/` vs `knowledge/wiki/` 레이어 분리) 적용 및 `llm-wiki-compiler` 파이프라인 연동 완료.
+- 데스크톱 통합을 위한 Personal Context MCP (`read_calendar_events`, `read_reminders`, `read_clipboard`) 연동 완료.
+- 무거운 구형 Meta-Loop(약 160KB 분량의 control_plane 등) 코드를 삭제하여 토큰/성능 최적화 완료.
+- Gemma 4 + MLX + TurboQuant 아키텍처에 대응하는 Native Tool-call/Parsing 한계를 Harness단에서 회피할 수 있는 체제 마련.
 
 완료 기준:
 
-- 새로운 Personal Recipe 실행 시 LLM이 스스로 Context를 ingest하고 위키에 구조화된 기록을 남김.
+- 새로운 Personal Recipe 실행 시 LLM이 스스로 Context를 ingest하고 위키에 구조화된 기록을 남김 (달성).
 
 ## 11. 우선순위 백로그
 

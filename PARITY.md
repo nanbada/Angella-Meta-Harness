@@ -1,12 +1,12 @@
 # Parity Status — Angella Harness
 
-Last updated: 2026-04-06
+Last updated: 2026-04-07
 
 ## Summary
 
-- Canonical document: this top-level `PARITY.md` is consumed by `scripts/run_harness_parity_diff.py`.
-- Scope: Angella harness runtime behavior, tracked knowledge sync, builtin search, and output compaction.
-- Requested checkpoint: 13 lanes implemented and checked by the parity diff runner.
+- Canonical document: this top-level `PARITY.md` outlines the fulfilled capabilities of the Angella harness.
+- Scope: Angella harness runtime behavior, OS context synchronization, LLM-Wiki integration, and output compaction.
+- *Note:* Massive over-engineered lanes (formerly relying on `meta_loop_ops.py`) were purged on 2026-04-07 to optimize for 160KB of token efficiency and refocus on the `LLM-Wiki` paradigm.
 
 ## Lane 1 — setup check clean exit
 
@@ -24,75 +24,17 @@ Last updated: 2026-04-06
 
 - Status: implemented
 - Evidence: `scripts/harness_catalog.py`
-- Evidence: `scripts/test_harness_self_optimize_adapter.py`
 - Evidence: `scripts/test_frontier_harness_reset.py`
 
-## Lane 4 — harness self-optimize verification-only
-
-- Status: implemented
-- Evidence: `recipes/harness-self-optimize.yaml`
-- Evidence: `mcp-servers/meta_loop_ops.py`
-- Evidence: `scripts/test_meta_loop_admin.py`
-
-## Lane 5 — finalize accepted run with promotion/export/failure closure
-
-- Status: implemented
-- Evidence: `mcp-servers/meta_loop_ops.py`
-- Evidence: `scripts/test_meta_loop_admin.py`
-
-## Lane 6 — accepted finalize pre-export wiki sync
-
-- Status: implemented
-- Evidence: `mcp-servers/meta_loop_ops.py`
-- Evidence: `scripts/test_meta_loop_admin.py`
-
-## Lane 7 — verification-only scoped wiki sync
-
-- Status: implemented
-- Evidence: `mcp-servers/meta_loop_ops.py`
-- Evidence: `scripts/test_meta_loop_admin.py`
-
-## Lane 8 — admin sync backfill policy
-
-- Status: implemented
-- Evidence: `config/knowledge-policy.yaml`
-- Evidence: `knowledge/index.md`
-- Evidence: `knowledge/log.md`
-- Evidence: `scripts/test_harness_knowledge.py`
-
-## Lane 9 — builtin search retrieval path
-
-- Status: implemented
-- Evidence: `mcp-servers/meta_loop_ops.py`
-- Evidence: `scripts/test_harness_knowledge.py`
-
-## Lane 10 — output compaction path
-
-- Status: implemented
-- Evidence: `mcp-servers/output_compactor.py`
-- Evidence: `scripts/test_harness_knowledge.py`
-
-## Lane 11 — knowledge lint path
-
-- Status: implemented
-- Evidence: `scripts/validate_harness_schema.py`
-- Evidence: `scripts/test_harness_knowledge.py`
-
-## Lane 12 — raw source registration path
-
-- Status: implemented
-- Evidence: `knowledge/sources/index.md`
-- Evidence: `scripts/test_harness_knowledge.py`
-
-## Lane 13 — query writeback path
-
-- Status: implemented
-- Evidence: `mcp-servers/meta_loop_ops.py`
-- Evidence: `scripts/test_harness_knowledge.py`
-
-## Lane 14 — LLM-Wiki & OS Personal Agent Path
+## Lane 4 — Multi-Tier OS Personal Agent & LLM-Wiki Integration
 
 - Status: implemented
 - Evidence: `recipes/personal-agent-loop.yaml`
-- Evidence: `knowledge/wiki/schema.md`
+- Evidence: `mcp-servers/llmwiki_compiler_ops.py`
 - Evidence: `mcp-servers/personal_context_ops.py`
+- Evidence: `knowledge/sources/` and `knowledge/wiki/` integration logic.
+
+## Lane 5 — Output Compaction Path
+
+- Status: implemented
+- Evidence: `mcp-servers/output_compactor.py` (Fully repaired MCP stdin loop).

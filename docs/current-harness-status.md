@@ -1,82 +1,29 @@
 # Current Harness Status
 
-This file is a handoff snapshot for the next work session.
+This file is a handoff snapshot for the current Angella architecture.
 
-## Main branch for structure work
+## Architecture Paradigm Shift
 
-- branch: `codex/gemma4-default-finalize-meta-loop`
-- PR: [#6](https://github.com/nanbada/Angella/pull/6)
-- purpose: merge-ready harness structure, control-plane policy, live run stabilization, and the stale config overwrite fix
-- merge intent: merge target
+Angella has transitioned from a rigid Autoresearch "Meta-Loop" (which relied on heavy Python test-driven scaffolding) to a **Personal Agent & LLM-Wiki** paradigm. 
+- Over 160KB of legacy over-engineered code (e.g., `meta_loop_ops.py`, `control_plane.py`) has been **purged** to maximize token efficiency.
+- The primary operation mode is now the `personal-agent-loop`, optimized for Apple Silicon (Mac M3 Pro).
 
-## Proof / reference branches
+## Hardware & Model Policy (Gemma 4 + MLX + TurboQuant)
 
-- PR [#7](https://github.com/nanbada/Angella/pull/7)
-  - accepted `recipe-runtime` proof/reference export
-- PR [#8](https://github.com/nanbada/Angella/pull/8)
-  - accepted `setup-yes-warm` live patch-producing proof/reference export
-  - reference proof only, not intended for merge
+- **Target Hardware:** MacBook Pro M3 36GB
+- **Target Model:** `dealignai/Gemma-4-31B-JANG_4M-CRACK` (approx. 18GB VRAM usage, leaving ~18GB for macOS and KV Cache).
+- **Tooling Constraints:** Since Gemma 4 native tool-calling (`<|tool_call|>`) is not fully parsed by standard `mlx-lm` yet, the Angella Harness provides scaffolding via `personal-agent-loop` to intercept and safely process tool calls.
+- **Engine:** Requires `vMLX 1.3.26+` or equivalent advanced inference servers to support the Gemma 4 Sliding Window Attention structures.
 
-## Merge policy
+## Verified Paths & Components
 
-- PR #6 is the only merge target
-- PR #7 and PR #8 stay open as proof/reference PRs
-- future accepted meta-loop exports should use new `codex/meta-loop-*` branches and new draft PRs instead of reusing #7 or #8
+- **LLM-Wiki Compiler:** Replaced legacy RAG and SQLite Vector DBs with `npx llm-wiki-compiler`. The agent autonomously updates interconnected markdown files in `knowledge/sources/`.
+- **Output Compactor:** Repaired `mcp-servers/output_compactor.py` to function natively via MCP stdio, successfully shrinking large output dumps (e.g., grep, terminal outputs) to drastically save LLM tokens.
+- **Personal Context Integrations:** OS-level integrations via AppleScript (Calendar events, Reminders) are fully functional through `personal_context_ops.py`.
+- **Secrets Management:** Managed securely away from Git via `.env.agents` logic.
 
-## Coverage matrix
+## Next Likely Tasks
 
-| Component | Latest outcome | Evidence |
-| --- | --- | --- |
-| `setup-check` | verification-only clean exit | `angella-verification-setup-check-success-20260406-1000` |
-| `profile-resolution` | verification-only clean exit | `angella-profile-resolution-verification-20260406-1005` |
-| `recipe-runtime` | verification-only clean exit | `angella-verification-recipe-runtime-verification-20260406-1000` |
-| `setup-yes-warm` | accepted live patch-producing proof | PR [#8](https://github.com/nanbada/Angella/pull/8) |
-
-## Verified paths
-
-- verification-only live self-optimize run records both `summary.json` and `report.md` and does not force finalize
-- verification-only summary updates now preserve `objective_component`, so inspection no longer collapses those runs to `unspecified`
-- tracked harness wiki now has canonical entrypoints in `knowledge/schema.md`, `knowledge/index.md`, `knowledge/log.md`, and `PARITY.md`
-- tracked harness wiki now includes `knowledge/sources/*.md` raw-source mirror pages and `knowledge/queries/*.md` saved query pages
-- accepted run finalize creates knowledge promotion artifacts, summary annotations, export branch, and draft PR
-- accepted run finalize now also closes matching `failures/open/*.json` artifacts for the same `source_run_id`
-- accepted and verification-only paths now both trigger tracked wiki sync plus builtin SQLite knowledge indexing
-- parity audits now write `.cache/angella/control-plane/parity-state.json` and recovery hints for failed lanes
-- live `setup-yes-warm` bug reproduction and accepted fix are proven by PR #8
-- `setup-check`, `profile-resolution`, and `recipe-runtime` all reached benchmark execution and exited cleanly through verification-only live runs
-
-## Known operational notes
-
-- default harness is now frontier-first; keep local runtimes such as `ollama serve` running only when fallback/augment paths are intended
-- `mlx-community/gemma-4-31b-it-4bit` (optimal local setting for M3 Pro 36GB) is added to `harness-models.yaml` as the `mlx_gemma4_31b_it_4bit` model tier
-- experimental `rtk` (Run-Time Kit) module and `frontier_token_saver_lab` profile were completely removed to prevent metric-swallowing bugs
-- `bash setup.sh --install-only --yes` now overwrites stale Goose config deterministically
-- **New Personal Agent Arcitecture integrated:** Added `personal_agent_tier` profile connecting multiple models via `scripts/setup-vault.sh`.
-- **LLM-Wiki implementation:** Repurposed `knowledge/` into an automated LLM-Wiki using Karpathy's compounding knowledge logic (`raw/`, `wiki/`, `index.md`, `log.md`).
-- `mcp-servers/personal_context_ops.py` added for OS interaction and clipboard access.
-
-## Merge readiness checklist
-
-- `python3 scripts/test_control_plane_logging.py`
-- `python3 scripts/test_frontier_harness_reset.py`
-- `python3 scripts/test_meta_loop_admin.py`
-- `python3 scripts/test_harness_self_optimize_adapter.py`
-- `python3 scripts/test_harness_knowledge.py`
-- `python3 scripts/test_harness_parity_diff.py`
-- `python3 scripts/test_optional_providers.py`
-- `python3 scripts/validate_harness_schema.py`
-- `python3 scripts/run_harness_parity_diff.py`
-- `bash scripts/test_setup_flows.sh`
-- `bash scripts/check-secrets.sh`
-- PR body for #6 reflects merge-target status
-- PR bodies for #7 and #8 explicitly state reference-proof policy
-
-## Next likely tasks
-
-- backfeed promoted knowledge from proof/reference branches into the merge-target branch so accepted learning is reused without manual copy
-- secure an accepted live patch-producing proof for `profile-resolution` or `recipe-runtime`
-- decide whether builtin search should stay SQLite-only or add optional `qmd` provider as a v2 adapter
-- decide whether heuristic compaction telemetry should expand from search/report snippets into broader benchmark output payloads
-- decide the policy boundary for auto-exporting generated wiki files versus operator-confirmed export packaging
-- decide whether to keep the latest verification-only run artifacts as reference notes in PR #6
-- merge PR #6 after review, then leave PR #7 and PR #8 as archived proof/reference branches
+1. Extend `llmwiki_compiler_ops.py` to seamlessly execute vector semantic searches using the newly structured wiki.
+2. Setup and integrate the local vMLX API server endpoint into `config/harness-profiles.yaml` for Gemma 4.
+3. Observe and mitigate potential Gemma 4 4-bit hallucination during deep reasoning by heavily enforcing the Karpathy "ingest & compile" wiki workflow.

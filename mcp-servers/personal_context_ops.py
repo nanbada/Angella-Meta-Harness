@@ -11,7 +11,7 @@ from pathlib import Path
 
 # Setup raw directory mapping
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = PROJECT_ROOT / "knowledge" / "raw"
+RAW_DIR = PROJECT_ROOT / "knowledge" / "sources"
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -24,9 +24,66 @@ def read_clipboard() -> str:
         return f"Error reading clipboard: {e}"
 
 
+def read_calendar_events() -> str:
+    """Reads today's macOS Calendar events via AppleScript."""
+    script = '''
+    set todayStart to (current date)
+    set time of todayStart to 0
+    set todayEnd to todayStart + 1 * days
+    set output to ""
+    tell application "Calendar"
+        repeat with c in calendars
+            try
+                set evts to (events of c whose start date >= todayStart and start date < todayEnd)
+                repeat with e in evts
+                    set output to output & (name of c as string) & " - " & (summary of e as string) & " (" & (start date of e as string) & ")\\n"
+                end repeat
+            on error
+                -- ignore protected or inaccessible calendars
+            end try
+        end repeat
+    end tell
+    if output is "" then return "No events scheduled for today."
+    return output
+    '''
+    try:
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+        if result.returncode != 0:
+            return f"Error accessing Calendar: {result.stderr}"
+        return result.stdout.strip()
+    except Exception as e:
+        return f"Execution exception: {e}"
+
+
+def read_reminders() -> str:
+    """Reads incomplete macOS Reminders via AppleScript."""
+    script = '''
+    set output to ""
+    tell application "Reminders"
+        try
+            set incompleteTasks to (reminders whose completed is false)
+            repeat with t in incompleteTasks
+                set output to output & "- " & (name of t as string) & "\\n"
+            end repeat
+        on error
+            return "Could not access Reminders."
+        end try
+    end tell
+    if output is "" then return "No incomplete reminders."
+    return output
+    '''
+    try:
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+        if result.returncode != 0:
+            return f"Error accessing Reminders: {result.stderr}"
+        return result.stdout.strip()
+    except Exception as e:
+        return f"Execution exception: {e}"
+
+
 def ingest_to_raw(source_identifier: str, content: str = None, is_file_path: bool = False) -> str:
     """
-    Ingests text or copies a file into the knowledge/raw directory for the LLM-Wiki.
+    Ingests text or copies a file into the knowledge/sources/ directory for the LLM-Wiki.
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() else "_" for c in source_identifier)
@@ -61,6 +118,12 @@ def handle_request(request: dict) -> dict:
     if tool == "read_clipboard":
         content = read_clipboard()
         return {"content": [{"type": "text", "text": content}]}
+    elif tool == "read_calendar_events":
+        content = read_calendar_events()
+        return {"content": [{"type": "text", "text": content}]}
+    elif tool == "read_reminders":
+        content = read_reminders()
+        return {"content": [{"type": "text", "text": content}]}
     elif tool == "ingest_to_raw":
         source_id = args.get("source_identifier", "unnamed")
         content = args.get("content")
@@ -84,8 +147,24 @@ if __name__ == "__main__":
                     }
                 },
                 {
+                    "name": "read_calendar_events",
+                    "description": "Reads the user's macOS Calendar to get today's scheduled events.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "read_reminders",
+                    "description": "Reads the user's macOS Reminders to get a list of active/incomplete tasks.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
                     "name": "ingest_to_raw",
-                    "description": "Ingests text content or copies an external file into the immutable `knowledge/raw/` directory for the LLM-Wiki. The agent should use this before synthesizing new wiki pages.",
+                    "description": "Ingests text content or copies an external file into the immutable `knowledge/sources/` directory for the LLM-Wiki. The agent should use this before synthesizing new wiki pages.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
