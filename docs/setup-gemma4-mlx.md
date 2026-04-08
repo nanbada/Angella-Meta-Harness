@@ -91,7 +91,27 @@ bash setup.sh --install-only --worker-model mlx_gemma4_31b_it_4bit --yes
 - Goose custom provider `angella_mlx_local`이 렌더링됨
 - endpoint가 비정상이면 `ANGELLA_LOCAL_WORKER_BACKEND=mlx`와 `ANGELLA_MLX_BASE_URL` 기준의 실패 메시지가 출력됨
 
-## 6. Runtime Usage
+## 6. Bootstrap Runtime Probe
+
+bootstrap venv의 `mlx` / `mlx_lm` import가 안전하게 되는지 보려면 아래 probe를 사용하세요.
+
+```bash
+python3 scripts/check_mlx_runtime.py --python .cache/angella/bootstrap-venv/bin/python
+```
+
+이 probe는 child process에서 import를 시도하므로, MLX import가 abort되어도 부모 진단 프로세스는 살아남습니다.
+
+대표적인 분류:
+
+- `ok`
+  - bootstrap venv에서 `mlx`, `mlx_lm` import 성공
+- `metal_device_init_crash`
+  - Metal device 초기화 단계에서 abort
+  - Codex 안에서는 sandbox / Metal visibility 제한일 수 있으므로, 필요하면 같은 probe를 sandbox 밖에서도 다시 실행해 비교
+- `missing_module`
+  - bootstrap venv에 `mlx` 또는 `mlx_lm`가 설치되지 않음
+
+## 7. Runtime Usage
 
 MLX worker가 선택된 상태에서 Goose는 setup이 렌더링한 provider/model 조합만 사용합니다.
 
@@ -107,12 +127,12 @@ goose run --recipe ~/.config/goose/recipes/personal-agent-loop.yaml -s
 
 `tool_parser_wrapper.py`는 이미 repo에 포함되어 있으므로 별도 wrapper 코드를 다시 추가할 필요가 없습니다.
 
-## 7. Knowledge Path
+## 8. Knowledge Path
 
 - raw knowledge source는 repo 내부 `knowledge/sources/`에 저장됩니다.
 - note 저장과 personal-context ingest는 외부 knowledge override가 아니라 이 내부 경로를 canonical source root로 사용합니다.
 
-## 8. 완료 기준
+## 9. 완료 기준
 
 Phase 5는 아래가 만족되면 완료로 봅니다.
 
