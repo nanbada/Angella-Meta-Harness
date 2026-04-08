@@ -111,7 +111,44 @@ python3 scripts/check_mlx_runtime.py --python .cache/angella/bootstrap-venv/bin/
 - `missing_module`
   - bootstrap venv에 `mlx` 또는 `mlx_lm`가 설치되지 않음
 
-## 7. Runtime Usage
+## 7. MLX Server Launcher
+
+bootstrap venv에 들어 있는 `mlx_lm.server`를 canonical env 기준으로 띄우려면 아래 launcher를 사용하세요.
+
+```bash
+python3 scripts/start_mlx_server.py --dry-run
+```
+
+기본값:
+
+- `ANGELLA_MLX_BASE_URL`가 없으면 `http://127.0.0.1:11435/v1`
+- `ANGELLA_MLX_MODEL`이 없으면 `mlx-community/gemma-4-31b-it-4bit`
+- server binary는 `.cache/angella/bootstrap-venv/bin/mlx_lm.server`
+
+launcher는 `ANGELLA_MLX_MODEL`을 그대로 `--model`에 넘깁니다. `mlx_lm` 소스 기준으로 이 값은:
+
+- 이미 변환된 local MLX model path일 수도 있고
+- Hugging Face repo id일 수도 있습니다
+
+즉 host network가 열려 있으면 repo id에서 직접 snapshot download를 트리거할 수 있습니다.
+
+실행 예시:
+
+```bash
+export ANGELLA_LOCAL_WORKER_BACKEND=mlx
+export ANGELLA_MLX_BASE_URL=http://127.0.0.1:11435/v1
+export ANGELLA_MLX_MODEL=mlx-community/gemma-4-31b-it-4bit
+
+python3 scripts/start_mlx_server.py
+```
+
+추가 server flag가 필요하면 `--` 뒤에 그대로 넘기세요.
+
+```bash
+python3 scripts/start_mlx_server.py -- --log-level DEBUG
+```
+
+## 8. Runtime Usage
 
 MLX worker가 선택된 상태에서 Goose는 setup이 렌더링한 provider/model 조합만 사용합니다.
 
@@ -127,12 +164,12 @@ goose run --recipe ~/.config/goose/recipes/personal-agent-loop.yaml -s
 
 `tool_parser_wrapper.py`는 이미 repo에 포함되어 있으므로 별도 wrapper 코드를 다시 추가할 필요가 없습니다.
 
-## 8. Knowledge Path
+## 9. Knowledge Path
 
 - raw knowledge source는 repo 내부 `knowledge/sources/`에 저장됩니다.
 - note 저장과 personal-context ingest는 외부 knowledge override가 아니라 이 내부 경로를 canonical source root로 사용합니다.
 
-## 9. 완료 기준
+## 10. 완료 기준
 
 Phase 5는 아래가 만족되면 완료로 봅니다.
 
