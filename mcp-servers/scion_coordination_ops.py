@@ -374,6 +374,15 @@ def _record_conflict_pairs(record: dict[str, Any], candidate_files: list[str]) -
     return pairs
 
 
+def _advisory_only_claims(peer: dict[str, Any], owner_records: list[dict[str, Any]]) -> list[str]:
+    residual: list[str] = []
+    for claimed in _normalize_paths(peer.get("claimed_files", [])):
+        if any(_record_conflict_pairs(record, [claimed]) for record in owner_records):
+            continue
+        residual.append(claimed)
+    return residual
+
+
 def _claim_conflicts_for_files(self_id: str, candidate_files: list[str]) -> list[dict[str, Any]]:
     conflicts: list[dict[str, Any]] = []
     for record in _load_claim_records():
@@ -897,12 +906,14 @@ def _summary_for_query(peers: list[dict[str, Any]], candidate_files: list[str]) 
         intent = peer.get("intent", "")
         peer_line = f"{peer['agent_id']} status={status}"
         owner_records = authoritative_by_owner.get(peer["agent_id"], [])
+        advisory_claims = _advisory_only_claims(peer, owner_records)
         if owner_records:
-            peer_line += " claims=" + ",".join(_format_claim_scope(record) for record in owner_records)
-        else:
-            claimed = peer.get("claimed_files", [])
-            if claimed:
-                peer_line += f" claims={','.join(claimed)}"
+            scopes = [_format_claim_scope(record) for record in owner_records]
+            if advisory_claims:
+                scopes.extend(advisory_claims)
+            peer_line += " claims=" + ",".join(scopes)
+        elif advisory_claims:
+            peer_line += f" claims={','.join(advisory_claims)}"
         if intent:
             peer_line += f" intent={intent}"
         if message:
@@ -916,11 +927,12 @@ def _summary_for_query(peers: list[dict[str, Any]], candidate_files: list[str]) 
             owner_pairs: list[tuple[str, str]] = []
             for record in owner_records:
                 owner_pairs.extend(_record_conflict_pairs(record, candidate_files))
-            if owner_pairs:
-                overlaps.append(f"{peer['agent_id']} -> {_format_conflict_pairs(owner_pairs)}")
+            advisory_pairs = _overlap_pairs(candidate_files, advisory_claims)
+            combined_pairs = owner_pairs + [pair for pair in advisory_pairs if pair not in owner_pairs]
+            if combined_pairs:
+                overlaps.append(f"{peer['agent_id']} -> {_format_conflict_pairs(combined_pairs)}")
         else:
-            claimed = peer.get("claimed_files", [])
-            overlap = _overlap_pairs(candidate_files, claimed)
+            overlap = _overlap_pairs(candidate_files, advisory_claims)
             if overlap:
                 overlaps.append(f"{peer['agent_id']} -> {_format_conflict_pairs(overlap)}")
 
@@ -941,12 +953,15 @@ def _conflicts_for_files(self_id: str, candidate_files: list[str]) -> list[dict[
         authoritative_by_owner.setdefault(owner, []).append(record)
     for peer in _active_peers(self_id):
         owner_records = authoritative_by_owner.get(peer["agent_id"], [])
+        advisory_claims = _advisory_only_claims(peer, owner_records)
         if owner_records:
             overlap: list[tuple[str, str]] = []
             for record in owner_records:
                 overlap.extend(_record_conflict_pairs(record, candidate_files))
+            advisory_pairs = _overlap_pairs(candidate_files, advisory_claims)
+            overlap.extend(pair for pair in advisory_pairs if pair not in overlap)
         else:
-            overlap = _overlap_pairs(candidate_files, peer.get("claimed_files", []))
+            overlap = _overlap_pairs(candidate_files, advisory_claims)
         if overlap:
             conflicts.append(
                 {

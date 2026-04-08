@@ -364,6 +364,47 @@ def main() -> int:
             restored_query_text = _text(restored_query)
             assert "angella-nested-owner -> src/api/server.py (peer claim: src/api)" in restored_query_text
 
+            os.environ["SCION_AGENT_ID"] = "angella-mixed-owner"
+            mixed_exclusive = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_claim_files",
+                    "arguments": {
+                        "files": ["docs/runbook"],
+                        "mode": "exclusive",
+                        "intent": "Own runbook area",
+                    },
+                }
+            )
+            assert "Claim mode: exclusive" in _text(mixed_exclusive)
+            mixed_advisory = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_claim_files",
+                    "arguments": {
+                        "files": ["README.md"],
+                        "mode": "advisory",
+                        "intent": "Lightweight README note",
+                    },
+                }
+            )
+            assert "Claimed 1 file(s)" in _text(mixed_advisory)
+
+            os.environ["SCION_AGENT_ID"] = "angella-mixed-observer"
+            mixed_query = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_query_peers",
+                    "arguments": {
+                        "query": "Can I edit the README?",
+                        "candidate_files": ["README.md"],
+                    },
+                }
+            )
+            mixed_query_text = _text(mixed_query)
+            assert "angella-mixed-owner -> README.md" in mixed_query_text
+            assert "peer claim: docs/runbook" not in mixed_query_text
+
             repo_root = Path(tmp_root) / "repo"
             repo_root.mkdir(parents=True, exist_ok=True)
             subprocess.run(["git", "init", "-b", "main", str(repo_root)], check=True, capture_output=True, text=True)
