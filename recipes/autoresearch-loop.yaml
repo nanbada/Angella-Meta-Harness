@@ -104,7 +104,7 @@ extensions:
   - 모든 benchmark 판단은 `run_benchmark`의 공통 필드만 신뢰합니다.
   - benchmark non-zero exit, metric parse failure, timeout은 모두 실패 iteration이며 baseline을 갱신하지 않습니다.
   - **Token Efficiency**: 긴 빌드 로그나 터미널 출력은 그대로 읽지 말고 항상 `output_compactor`의 `compact_output`을 통해 요약된 핵심 내용만 파악하세요. 특히 `token_saver_enabled: true` 프로파일 환경에서는 강제 사항입니다.
-  - **Scion Swarm Coordination**: 현재 당신은 Google Scion에 의해 오케스트레이션되는 다중 인스턴스 중 하나일 수 있습니다. 특정 파일을 대규모로 수정하기 전에 반드시 `scion_query_peers`를 호출하여 다른 Angella 인스턴스와 파일 수정 충돌(Conflict)이 없는지 확인하세요.
+  - **Scion Swarm Coordination**: 현재 당신은 Google Scion에 의해 오케스트레이션되는 다중 인스턴스 중 하나일 수 있습니다. 특정 파일을 대규모로 수정하기 전에 반드시 `scion_query_peers`를 호출하여 다른 Angella 인스턴스와 파일 수정 충돌(Conflict)이 없는지 확인하고, 수정 범위가 정해지면 `scion_claim_files`로 claim을 남기세요. 작업이 끝나면 `scion_release_claims`로 claim을 해제하세요.
 
   ## Phase 0: Preflight + Run Context + Search-First Memory
   1. `cd {{ target_project_path }}` 후 아래를 순서대로 확인합니다.
@@ -139,18 +139,20 @@ extensions:
   [Gather]
   1. 현재 코드와 이전 실패 이유를 봅니다. 복잡한 의사결정이 필요하다면 반드시 `llmwiki_query`에서 먼저 지식을 검색하여 방향을 잡으세요.
   2. 가설 3~5개를 제안하고, 그중 가장 유망한 1개만 선택합니다.
+  3. 대규모 수정이 예상되는 파일/디렉터리가 정해지면 `scion_query_peers`로 충돌을 확인하고, 진행할 경우 `scion_claim_files`로 claim을 등록하세요.
 
   [Act]
-  3. 목표 metric과 직접 관련 없는 광범위한 리팩토링은 엄격히 금지합니다.
+  4. 목표 metric과 직접 관련 없는 광범위한 리팩토링은 엄격히 금지합니다.
 
   [Verify (스스로 검증)]
-  4. 파일 수정 후 자체 로컬 검증 스윕(Verify)을 실행하세요. 오류가 긴 경우 `compact_output`으로 압축하여 원인을 분석하세요.
-  5. 구현 및 자체 검증이 완료되면 `git add -A` 후 `git commit -m "autoresearch: iteration N - [변경 요약]"`을 수행합니다.
-  6. `candidate_commit=$(git rev-parse HEAD)`를 기록하고 `run_benchmark`를 호출합니다.
-  7. **[Negative Memory 저장]** benchmark payload 판정 시 `success=false` 이거나 개선에 실패하여 revert 해야 할 경우, 그 실패 원인과 시도했던 논리를 `llmwiki_query` 도구의 `save=true` 옵션을 사용해 하네스 영구 기억에 추가하세요. 동일 가설 재시도를 막기 위함입니다.
-  8. 개선이면 (`decision="keep"`) baseline 갱신, 아니면 (`decision="revert"`) `git revert HEAD --no-edit`로 되돌립니다.
-  9. 매 iteration마다 `save_loop_log`를 호출합니다.
-  10. `PROGRESS.md`를 업데이트하여 이 정보를 영속 메모리화합니다.
+  5. 파일 수정 후 자체 로컬 검증 스윕(Verify)을 실행하세요. 오류가 긴 경우 `compact_output`으로 압축하여 원인을 분석하세요.
+  6. 구현 및 자체 검증이 완료되면 `git add -A` 후 `git commit -m "autoresearch: iteration N - [변경 요약]"`을 수행합니다.
+  7. `candidate_commit=$(git rev-parse HEAD)`를 기록하고 `run_benchmark`를 호출합니다.
+  8. **[Negative Memory 저장]** benchmark payload 판정 시 `success=false` 이거나 개선에 실패하여 revert 해야 할 경우, 그 실패 원인과 시도했던 논리를 `llmwiki_query` 도구의 `save=true` 옵션을 사용해 하네스 영구 기억에 추가하세요. 동일 가설 재시도를 막기 위함입니다.
+  9. 개선이면 (`decision="keep"`) baseline 갱신, 아니면 (`decision="revert"`) `git revert HEAD --no-edit`로 되돌립니다.
+  10. 매 iteration마다 `save_loop_log`를 호출합니다.
+  11. iteration 종료 시 `scion_release_claims`로 해당 claim을 해제하세요.
+  12. `PROGRESS.md`를 업데이트하여 이 정보를 영속 메모리화합니다.
 
   ## 종료 조건
   - `{{ max_iterations }}`회 도달

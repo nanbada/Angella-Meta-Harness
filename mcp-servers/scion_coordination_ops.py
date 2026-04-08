@@ -1,76 +1,391 @@
 #!/usr/bin/env python3
 """
-MCP Server for Google Scion Coordination.
-Provides tools for Angella agents to broadcast findings and query peers
-within a Scion Grove.
+MCP Server for Scion-style coordination.
+Provides file-backed peer discovery, file claiming, and broadcast events
+within a shared directory that mimics a lightweight Scion Grove.
 """
+
+from __future__ import annotations
+
 import json
 import os
+import socket
 import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso_now() -> str:
+    return _utc_now().isoformat()
+
+
+def _angella_root() -> Path:
+    configured = os.environ.get("ANGELLA_ROOT", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path.cwd().resolve()
+
+
+def _shared_dir() -> Path:
+    configured = os.environ.get("SCION_SHARED_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (_angella_root() / ".scion" / "shared").resolve()
+
+
+def _agents_dir() -> Path:
+    return _shared_dir() / "agents"
+
+
+def _events_dir() -> Path:
+    return _shared_dir() / "events"
+
+
+def _ensure_layout() -> None:
+    _agents_dir().mkdir(parents=True, exist_ok=True)
+    _events_dir().mkdir(parents=True, exist_ok=True)
+
+
+def _agent_id() -> str:
+    configured = os.environ.get("SCION_AGENT_ID", "").strip()
+    if configured:
+        return configured
+    return f"angella-{socket.gethostname()}-{os.getpid()}"
+
+
+def _default_ttl_seconds() -> int:
+    raw = os.environ.get("SCION_TTL_SECONDS", "").strip()
+    if raw.isdigit():
+        return max(30, int(raw))
+    return 900
+
+
+def _normalize_path(value: str) -> str:
+    normalized = value.strip().replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized.rstrip("/")
+
+
+def _normalize_paths(values: list[str] | None) -> list[str]:
+    if not values:
+        return []
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = _normalize_path(value)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        output.append(normalized)
+    return sorted(output)
+
+
+def _agent_state_path(agent_id: str) -> Path:
+    return _agents_dir() / f"{agent_id}.json"
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", delete=False, dir=str(path.parent), encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
+        temp_path = Path(handle.name)
+    temp_path.replace(path)
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _fresh(state: dict[str, Any]) -> bool:
+    expires = float(state.get("expires_at_epoch", 0.0) or 0.0)
+    return expires > time.time()
+
+
+def _load_agent_state(agent_id: str) -> dict[str, Any]:
+    path = _agent_state_path(agent_id)
+    if path.exists():
+        return _read_json(path)
+    ttl = _default_ttl_seconds()
+    now = time.time()
+    return {
+        "agent_id": agent_id,
+        "status": "idle",
+        "intent": "",
+        "message": "",
+        "claimed_files": [],
+        "metadata": {},
+        "updated_at": _iso_now(),
+        "updated_at_epoch": now,
+        "expires_at_epoch": now + ttl,
+    }
+
+
+def _save_agent_state(
+    agent_id: str,
+    *,
+    status: str | None = None,
+    intent: str | None = None,
+    message: str | None = None,
+    claimed_files: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+    ttl_seconds: int | None = None,
+) -> dict[str, Any]:
+    state = _load_agent_state(agent_id)
+    now = time.time()
+    ttl = max(30, ttl_seconds or _default_ttl_seconds())
+
+    if status is not None:
+        state["status"] = status
+    if intent is not None:
+        state["intent"] = intent
+    if message is not None:
+        state["message"] = message
+    if claimed_files is not None:
+        state["claimed_files"] = _normalize_paths(claimed_files)
+    if metadata is not None:
+        state["metadata"] = metadata
+
+    state["updated_at"] = _iso_now()
+    state["updated_at_epoch"] = now
+    state["expires_at_epoch"] = now + ttl
+
+    _write_json(_agent_state_path(agent_id), state)
+    return state
+
+
+def _record_event(agent_id: str, kind: str, payload: dict[str, Any]) -> Path:
+    now = _utc_now()
+    event = {
+        "agent_id": agent_id,
+        "kind": kind,
+        "timestamp": now.isoformat(),
+        "payload": payload,
+    }
+    path = _events_dir() / f"{int(now.timestamp() * 1000)}-{agent_id}-{kind}.json"
+    _write_json(path, event)
+    return path
+
+
+def _active_peers(self_id: str) -> list[dict[str, Any]]:
+    peers: list[dict[str, Any]] = []
+    for path in sorted(_agents_dir().glob("*.json")):
+        try:
+            state = _read_json(path)
+        except Exception:
+            continue
+        if state.get("agent_id") == self_id:
+            continue
+        if not _fresh(state):
+            continue
+        peers.append(state)
+    return peers
+
+
+def _overlap(candidate_files: list[str], peer_files: list[str]) -> list[str]:
+    candidate = set(_normalize_paths(candidate_files))
+    peer = set(_normalize_paths(peer_files))
+    return sorted(candidate & peer)
+
+
+def _summary_for_query(peers: list[dict[str, Any]], candidate_files: list[str]) -> str:
+    if not peers:
+        return f"No active Scion peers registered in {_shared_dir()}."
+
+    overlaps: list[str] = []
+    peer_lines: list[str] = []
+    for peer in peers:
+        claimed = peer.get("claimed_files", [])
+        status = peer.get("status", "unknown")
+        message = peer.get("message", "")
+        intent = peer.get("intent", "")
+        peer_line = f"{peer['agent_id']} status={status}"
+        if claimed:
+            peer_line += f" claims={','.join(claimed)}"
+        if intent:
+            peer_line += f" intent={intent}"
+        if message:
+            peer_line += f" message={message}"
+        peer_lines.append(peer_line)
+
+        overlap = _overlap(candidate_files, claimed)
+        if overlap:
+            overlaps.append(f"{peer['agent_id']} -> {', '.join(overlap)}")
+
+    if overlaps:
+        return "Conflicts detected with active peers:\n" + "\n".join(overlaps) + "\n\nActive peers:\n" + "\n".join(peer_lines)
+    return "No direct conflicts detected.\n\nActive peers:\n" + "\n".join(peer_lines)
+
 
 def handle_request(request: dict) -> dict:
     if request.get("type") != "call_tool":
         return {"error": "Only call_tool requests are supported."}
 
+    _ensure_layout()
+
     tool = request.get("name")
     args = request.get("arguments", {})
-    
-    # In a real Scion environment, this would interface with the Scion Hub API
-    # or the `.scion/coordination` shared directory.
-    scion_shared_dir = os.environ.get("SCION_SHARED_DIR", ".scion/shared")
+    agent_id = _agent_id()
 
     if tool == "scion_broadcast":
         message = args.get("message")
-        agent_id = os.environ.get("SCION_AGENT_ID", "angella-unknown")
         if not message:
             return {"error": "Missing 'message' argument."}
-        
-        # Simulating broadcast to Scion Hub
+        files = _normalize_paths(args.get("files", []))
+        status = args.get("status", "active")
+        metadata = args.get("metadata", {})
+        ttl_seconds = args.get("ttl_seconds")
+
+        previous = _load_agent_state(agent_id)
+        state = _save_agent_state(
+            agent_id,
+            status=status,
+            message=message,
+            intent=args.get("intent", previous.get("intent", "")),
+            claimed_files=files if files else previous.get("claimed_files", []),
+            metadata=metadata,
+            ttl_seconds=ttl_seconds,
+        )
+        event_path = _record_event(agent_id, "broadcast", {"message": message, "files": state.get("claimed_files", [])})
+        text = (
+            f"Broadcast recorded for {agent_id} in {_shared_dir()} "
+            f"(claims={len(state.get('claimed_files', []))}, event={event_path.name})."
+        )
         print(f"[SCION BROADCAST from {agent_id}] {message}", file=sys.stderr)
-        return {"content": [{"type": "text", "text": f"Successfully broadcasted to Scion Hub: {message}"}]}
-        
-    elif tool == "scion_query_peers":
+        return {"content": [{"type": "text", "text": text}]}
+
+    if tool == "scion_claim_files":
+        files = _normalize_paths(args.get("files"))
+        if not files:
+            return {"error": "Missing 'files' argument."}
+        state = _load_agent_state(agent_id)
+        current = set(_normalize_paths(state.get("claimed_files", [])))
+        current.update(files)
+        intent = args.get("intent", state.get("intent", ""))
+        ttl_seconds = args.get("ttl_seconds")
+        saved = _save_agent_state(
+            agent_id,
+            status="claiming",
+            intent=intent,
+            message=args.get("message", state.get("message", "")),
+            claimed_files=sorted(current),
+            metadata=args.get("metadata", state.get("metadata", {})),
+            ttl_seconds=ttl_seconds,
+        )
+        _record_event(agent_id, "claim", {"files": files, "intent": intent})
+        text = f"Claimed {len(files)} file(s) for {agent_id}: {', '.join(files)}"
+        return {"content": [{"type": "text", "text": text}]}
+
+    if tool == "scion_release_claims":
+        files = _normalize_paths(args.get("files", []))
+        state = _load_agent_state(agent_id)
+        current = _normalize_paths(state.get("claimed_files", []))
+        if files:
+            remaining = [item for item in current if item not in set(files)]
+        else:
+            remaining = []
+        status = "idle" if not remaining else state.get("status", "active")
+        saved = _save_agent_state(
+            agent_id,
+            status=status,
+            intent=state.get("intent", ""),
+            message=args.get("note", state.get("message", "")),
+            claimed_files=remaining,
+            metadata=state.get("metadata", {}),
+            ttl_seconds=args.get("ttl_seconds"),
+        )
+        _record_event(agent_id, "release", {"released_files": files or current, "remaining_files": saved.get("claimed_files", [])})
+        released = files or current
+        text = f"Released {len(released)} claim(s) for {agent_id}."
+        return {"content": [{"type": "text", "text": text}]}
+
+    if tool == "scion_query_peers":
         query = args.get("query")
         if not query:
             return {"error": "Missing 'query' argument."}
-        
-        # Simulating querying other agents in the Scion Grove
-        print(f"[SCION QUERY] {query}", file=sys.stderr)
-        # Mock response for the experimental integration phase
-        mock_response = "Peer Angella-Beta is currently modifying 'src/frontend'. Avoid conflicting changes in that directory."
-        return {"content": [{"type": "text", "text": mock_response}]}
-        
-    else:
-        return {"error": f"Unknown tool: {tool}"}
+        candidate_files = _normalize_paths(args.get("candidate_files", args.get("files", [])))
+        peers = _active_peers(agent_id)
+        text = _summary_for_query(peers, candidate_files)
+        print(f"[SCION QUERY by {agent_id}] {query}", file=sys.stderr)
+        return {"content": [{"type": "text", "text": text}]}
+
+    return {"error": f"Unknown tool: {tool}"}
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--describe":
-        print(json.dumps({
-            "tools": [
+        print(
+            json.dumps(
                 {
-                    "name": "scion_broadcast",
-                    "description": "Broadcasts a discovery, negative memory, or plan to other Angella instances orchestrated by Scion.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "message": {"type": "string", "description": "The message or finding to broadcast."}
+                    "tools": [
+                        {
+                            "name": "scion_broadcast",
+                            "description": "Records a broadcast message and optional claimed files into file-backed shared Scion state.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "message": {"type": "string", "description": "The message or finding to broadcast."},
+                                    "files": {"type": "array", "items": {"type": "string"}, "description": "Optional list of repo-relative files or areas associated with the broadcast."},
+                                    "intent": {"type": "string", "description": "Optional work intent summary."},
+                                    "status": {"type": "string", "description": "Agent status label such as active or planning."},
+                                    "ttl_seconds": {"type": "integer", "description": "Optional TTL for this agent state."},
+                                    "metadata": {"type": "object", "description": "Optional arbitrary metadata."},
+                                },
+                                "required": ["message"],
+                            },
                         },
-                        "required": ["message"]
-                    }
-                },
-                {
-                    "name": "scion_query_peers",
-                    "description": "Queries the Scion Hub to check what other agents are currently working on to avoid file conflicts or duplicate work.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "query": {"type": "string", "description": "The question to ask the Scion Hub about peer agents."}
+                        {
+                            "name": "scion_claim_files",
+                            "description": "Claims one or more files or repo areas in shared Scion state to reduce edit conflicts.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "files": {"type": "array", "items": {"type": "string"}, "description": "Repo-relative files or areas to claim."},
+                                    "intent": {"type": "string", "description": "Optional short intent for the claim."},
+                                    "message": {"type": "string", "description": "Optional note to attach to the agent state."},
+                                    "ttl_seconds": {"type": "integer", "description": "Optional TTL for this agent state."},
+                                    "metadata": {"type": "object", "description": "Optional arbitrary metadata."},
+                                },
+                                "required": ["files"],
+                            },
                         },
-                        "required": ["query"]
-                    }
+                        {
+                            "name": "scion_release_claims",
+                            "description": "Releases all or a subset of the current agent's claimed files from shared Scion state.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "files": {"type": "array", "items": {"type": "string"}, "description": "Optional subset of files to release. Omit to release all claims."},
+                                    "note": {"type": "string", "description": "Optional note to leave when releasing claims."},
+                                    "ttl_seconds": {"type": "integer", "description": "Optional TTL for the updated agent state."},
+                                },
+                            },
+                        },
+                        {
+                            "name": "scion_query_peers",
+                            "description": "Queries file-backed shared Scion state to discover active peers and overlapping file claims.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "description": "The question to ask about peer agent activity."},
+                                    "candidate_files": {"type": "array", "items": {"type": "string"}, "description": "Optional repo-relative files or areas to compare against peer claims."},
+                                    "files": {"type": "array", "items": {"type": "string"}, "description": "Legacy alias for candidate_files."},
+                                },
+                                "required": ["query"],
+                            },
+                        },
+                    ]
                 }
-            ]
-        }))
+            )
+        )
         sys.exit(0)
 
     for line in sys.stdin:
@@ -81,5 +396,5 @@ if __name__ == "__main__":
             req = json.loads(line)
             res = handle_request(req)
             print(json.dumps(res), flush=True)
-        except Exception as e:
-            print(json.dumps({"error": str(e)}), flush=True)
+        except Exception as exc:  # pragma: no cover - stdio guard
+            print(json.dumps({"error": str(exc)}), flush=True)

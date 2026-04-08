@@ -21,3 +21,4 @@ Angella의 모든 에이전트 활동은 이 하네스 철학을 최우선으로
 ## 5. Swarm Coordination (Isolation)
 - 다중 에이전트 실행 시 **Google Scion**의 원칙에 따라 독립된 Worktree에서 동작합니다.
 - 대규모 수정 전 동료 에이전트와의 충돌 여부를 `scion_query_peers`로 확인합니다.
+- 수정 범위가 정해지면 `scion_claim_files`로 claim을 남기고, 작업 완료 후 `scion_release_claims`로 해제합니다.

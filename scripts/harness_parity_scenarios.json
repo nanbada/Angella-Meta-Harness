@@ -52,11 +52,12 @@
     },
     {
       "id": 6,
-      "title": "google scion coordination (pilot/mock)",
+      "title": "google scion coordination (file-backed mvp)",
       "status": "implemented",
       "evidence": [
         "mcp-servers/scion_coordination_ops.py",
         "recipes/autoresearch-loop.yaml",
+        "scripts/test_scion_coordination.py",
         "docs/arch-snapshot.md"
       ]
     },

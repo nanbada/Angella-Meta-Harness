@@ -12,7 +12,7 @@
 - **워커 모델**: `mlx-community/gemma-4-31b-it-4bit` (TurboQuant 최적화)
 - **Local Worker Contract**: MLX 경로는 `ANGELLA_LOCAL_WORKER_BACKEND=mlx`, `ANGELLA_MLX_BASE_URL`, `ANGELLA_MLX_MODEL`을 사용하는 OpenAI-compatible local endpoint topology를 canonical path로 삼습니다.
 - **Tool-calling 보정**: Gemma 4의 네이티브 태그 파싱 오류를 하네스 단(`tool_parser_wrapper.py`)에서 가로채어 보정합니다.
-- **Swarm Coordination Stance**: Scion은 현재 실서비스 백플레인이 아니라 Angella가 참조하는 pilot/mock coordination layer입니다.
+- **Swarm Coordination Stance**: Scion은 현재 실서비스 백플레인은 아니지만, Angella는 `.scion/shared` 또는 `SCION_SHARED_DIR` 기반의 file-backed coordination MVP를 통해 peer discovery, file claim, broadcast를 수행합니다.
 
 ## 3. 프로젝트 구조 (Directory Map)
 ```text
@@ -33,7 +33,7 @@ Angella/
 │   ├── llmwiki_compiler_ops.py # 위키 관리 도구
 │   ├── output_compactor.py     # 로그 압축 도구
 │   ├── personal_context_ops.py # OS 연동 도구
-│   ├── scion_coordination_ops.py # Scion pilot/mock coordination
+│   ├── scion_coordination_ops.py # Scion file-backed coordination MVP
 │   └── tool_parser_wrapper.py  # Gemma 4 tool-call 보정
 └── logs/                       # 실행 결과 및 투명성 리포트
 ```
@@ -43,11 +43,12 @@ Angella/
 - **MLX Runtime Inputs**: `setup.sh`는 `.env.mlx` 또는 `.env.mlx.example`를 bootstrap/check/install 단계에서 읽고, MLX worker 선택 시 Goose custom provider `angella_mlx_local`을 자동 렌더링합니다.
 - **Bootstrap Env**: `.cache/angella/bootstrap-venv` (런타임 격리)
 - **Cache Paths**: `.cache/angella/uv`, `.cache/angella/pip`
+- **Scion Shared State**: 기본 경로는 `.scion/shared`이며, 필요하면 `SCION_SHARED_DIR`로 다른 공유 디렉터리나 worktree 간 coordination 경로를 지정할 수 있습니다.
 - **Secrets**: `.env.agents` (Git 추적 제외, 다중 API Key 관리)
 
 ## 5. 핵심 모듈 상세
 - **llm-wiki-compiler**: legacy RAG를 대체하는 현대적 마크다운 기반 지식 파이프라인.
 - **output-compactor**: 긴 터미널 출력에서 핵심 에러/결과만 추출하여 토큰 소모 40% 이상 절감.
 - **personal-context**: clipboard/calendar/reminders와 raw source ingest를 통해 OS 컨텍스트를 Angella 쪽으로 가져옵니다.
-- **scion-coordination**: Google Scion 개념을 참조하는 pilot/mock 협업 레이어입니다. 현재 레시피와 문서에서 참조되지만 구현은 stub 기반입니다.
+- **scion-coordination**: Google Scion 개념을 참조하는 file-backed coordination MVP입니다. active peer 상태, file claim, broadcast event를 shared dir에 기록해 충돌을 줄입니다.
 - **tool-parser-wrapper**: Gemma 4의 native tool-call tag를 MCP 친화적 문자열로 정규화합니다.

@@ -92,6 +92,10 @@ async def main() -> int:
 
     assert "name: metric-benchmark" in goose_text
     assert "name: obsidian-auto-log" in goose_text
+    assert "scion_claim_files" in autoresearch_text
+    assert "scion_release_claims" in autoresearch_text
+    assert "scion_claim_files" in personal_text
+    assert "scion_release_claims" in personal_text
     assert '"name": "angella_mlx_local"' in mlx_template
     assert "__ANGELLA_MLX_BASE_URL__" in mlx_template
     assert "__ANGELLA_MLX_MODEL__" in mlx_template

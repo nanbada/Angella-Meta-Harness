@@ -5,6 +5,7 @@ __pycache__/
 logs/
 .config/
 .cache/
+.scion/
 venv/
 
 # Local environment and secret material

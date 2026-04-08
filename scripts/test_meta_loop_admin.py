@@ -35,9 +35,10 @@ def main() -> int:
     assert "scripts/run_harness_parity_diff.py" in parity_text
     assert "retired on 2026-04-07" in parity_text
     assert "Lane 7 — retired meta-loop/control-plane surface removed" in parity_text
+    assert "Lane 6 — google scion coordination (file-backed mvp)" in parity_text
 
     arch_text = (ROOT_DIR / "docs" / "arch-snapshot.md").read_text(encoding="utf-8")
-    assert "pilot/mock coordination layer" in arch_text
+    assert "file-backed coordination MVP" in arch_text
     assert "공유 wiki 저장소 (현재 repo 내부 디렉터리)" in arch_text
     assert "다른 프로젝트와 외부 채널" in arch_text
     assert "다시 외부 경로 symlink로 바꿀 수" in arch_text
@@ -51,6 +52,10 @@ def main() -> int:
     assert "git checkout codex/gemma4-default-finalize-meta-loop" not in mlx_guide
     assert "config/harness-models.yaml" in mlx_guide
     assert "수동 편집할 필요가 없습니다" in mlx_guide
+
+    roadmap_text = (ROOT_DIR / "plan.md").read_text(encoding="utf-8")
+    assert "Phase 7 (진행 중)" in roadmap_text
+    assert "file-backed coordination MVP" in roadmap_text
 
     print("meta loop admin tests passed")
     return 0

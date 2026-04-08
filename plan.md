@@ -27,9 +27,10 @@ Angella는 모델 독립적인 **지능형 하네스(Harness)**를 통해 에이
 - Python 기반 legacy Meta-Loop를 NPM `llm-wiki-compiler`로 완전 대체.
 - Personal Context (Calendar, Note) 연동 MCP 구축.
 
-### Phase 7 (신규) - 군집 지능 (Swarm)
-- **Google Scion** 통합: 병렬 에이전트 오케스트레이션.
-- 에이전트 간 지식 전파 및 충돌 방지 조정 레이어 강화.
+### Phase 7 (진행 중) - 군집 지능 (Swarm)
+- **Google Scion** 개념을 참조하는 file-backed coordination MVP 구현 (`.scion/shared`, `SCION_SHARED_DIR`).
+- 에이전트 간 file claim, broadcast, peer query를 통한 충돌 방지 조정 레이어 강화.
+- 다음 단계: 실제 hub/backplane 연동과 multi-worktree orchestration 고도화.
 
 ## 4. 성공 지표
 - **Repeatability**: 동일 환경 clone 후 5분 내 실행 성공.

@@ -43,11 +43,12 @@ Last updated: 2026-04-08
 - Evidence: `mcp-servers/output_compactor.py`
 - Evidence: `scripts/test_harness_knowledge.py`
 
-## Lane 6 — google scion coordination (pilot/mock)
+## Lane 6 — google scion coordination (file-backed mvp)
 
 - Status: implemented
 - Evidence: `mcp-servers/scion_coordination_ops.py`
 - Evidence: `recipes/autoresearch-loop.yaml`
+- Evidence: `scripts/test_scion_coordination.py`
 - Evidence: `docs/arch-snapshot.md`
 
 ## Lane 7 — retired meta-loop/control-plane surface removed
