@@ -126,7 +126,7 @@
       "provider": "custom",
       "goose_provider": "angella_apfel_local",
       "model": "apple-foundationmodel",
-      "display_name": "apfel Foundation Model",
+      "display_name": "Legacy apfel Foundation Model",
       "role_support": ["worker"],
       "context_limit": 8192,
       "temperature_default": 0.2,
@@ -145,7 +145,7 @@
     {
       "id": "mlx_gemma4_31b_it_4bit",
       "provider": "custom",
-      "goose_provider": "angella_apfel_local",
+      "goose_provider": "angella_mlx_local",
       "model": "mlx-community/gemma-4-31b-it-4bit",
       "display_name": "MLX Gemma 4 31B It (4-bit)",
       "role_support": ["worker"],
@@ -157,8 +157,8 @@
       "cost_score": 95,
       "stability_score": 85,
       "priority": 85,
-      "requires_env": ["ANGELLA_APFEL_BASE_URL"],
-      "availability_check": ["apfel_health"],
+      "requires_env": [],
+      "availability_check": ["local_worker_backend:mlx", "mlx_health"],
       "auto_pull_on_bootstrap": false,
       "flags": ["mlx_local", "reasoning", "local", "fallback", "augment", "cache"],
       "tier": "local"

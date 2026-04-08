@@ -65,6 +65,8 @@ async def main() -> int:
     autoresearch_text = (ROOT_DIR / "recipes" / "autoresearch-loop.yaml").read_text(encoding="utf-8")
     personal_text = (ROOT_DIR / "recipes" / "personal-agent-loop.yaml").read_text(encoding="utf-8")
     goose_text = (ROOT_DIR / "config" / "goose-config.yaml").read_text(encoding="utf-8")
+    mlx_template = (ROOT_DIR / "config" / "custom-providers" / "mlx-local.json.template").read_text(encoding="utf-8")
+    mlx_guide = (ROOT_DIR / "docs" / "setup-gemma4-mlx.md").read_text(encoding="utf-8")
 
     for expected in (
         "name: metric-benchmark",
@@ -90,6 +92,12 @@ async def main() -> int:
 
     assert "name: metric-benchmark" in goose_text
     assert "name: obsidian-auto-log" in goose_text
+    assert '"name": "angella_mlx_local"' in mlx_template
+    assert "__ANGELLA_MLX_BASE_URL__" in mlx_template
+    assert "__ANGELLA_MLX_MODEL__" in mlx_template
+    assert "ANGELLA_LOCAL_WORKER_BACKEND" in mlx_guide
+    assert "ANGELLA_MLX_BASE_URL" in mlx_guide
+    assert "ANGELLA_MLX_MODEL" in mlx_guide
 
     print("harness self-optimize adapter tests passed")
     return 0

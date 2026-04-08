@@ -7,10 +7,9 @@ export ANGELLA_ROOT="$ROOT_DIR"
 # shellcheck source=./setup-common.sh
 source "$ROOT_DIR/scripts/setup-common.sh"
 
-resolve_env_mlx_path
-
 if [ "$CHECK_ONLY" = true ]; then
     detect_python_runtime
+    load_mlx_environment false
     check_python_requirements_support
     check_templates_only
     report_harness_credential_status
@@ -18,18 +17,14 @@ if [ "$CHECK_ONLY" = true ]; then
 fi
 
 load_python_for_install_stage
+load_mlx_environment true
 
 if [ -n "$HARNESS_PROFILE" ] || [ -n "$LEAD_MODEL_OVERRIDE" ] || [ -n "$PLANNER_MODEL_OVERRIDE" ] || [ -n "$WORKER_MODEL_OVERRIDE" ]; then
     resolve_harness_selection
     write_bootstrap_state
 fi
 
-info "Loading MLX environment variables..."
-# shellcheck source=/dev/null
-source "$ENV_MLX_PATH"
-ok "Environment variables loaded"
-
-render_apfel_custom_provider
+render_local_custom_providers
 install_templates
 
 mkdir -p "$SCRIPT_DIR/logs/Goose Logs"

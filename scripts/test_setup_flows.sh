@@ -114,6 +114,21 @@ MODELS_OUT="$TMP_ROOT/models.out"
 grep -q "google_gemini_2_5_pro" "$MODELS_OUT"
 grep -q "ollama_gemma4_26b" "$MODELS_OUT"
 grep -q "openai_gpt_5_2_pro: roles=lead,planner,worker" "$MODELS_OUT"
+grep -q "mlx_gemma4_31b_it_4bit: .*ANGELLA_LOCAL_WORKER_BACKEND=mlx" "$MODELS_OUT"
+grep -q "mlx_gemma4_31b_it_4bit: .*ANGELLA_MLX_BASE_URL" "$MODELS_OUT"
+
+MLX_MODELS_OUT="$TMP_ROOT/mlx-models.out"
+(
+  cd "$ROOT_DIR"
+  HOME="$CHECK_HOME" \
+  ANGELLA_LOCAL_WORKER_BACKEND=mlx \
+  ANGELLA_MLX_BASE_URL=http://127.0.0.1:11435/v1 \
+  ANGELLA_MLX_MODEL=mlx-community/gemma-4-31b-it-4bit \
+  ANGELLA_MLX_HEALTHCHECK_OK=1 \
+  bash setup.sh --list-models >"$MLX_MODELS_OUT" 2>/dev/null
+)
+grep -q "mlx_gemma4_31b_it_4bit: .*provider=angella_mlx_local" "$MLX_MODELS_OUT"
+grep -q "mlx_gemma4_31b_it_4bit: .*status=enabled" "$MLX_MODELS_OUT"
 
 PROFILES_OUT="$TMP_ROOT/profiles.out"
 (
@@ -122,6 +137,18 @@ PROFILES_OUT="$TMP_ROOT/profiles.out"
 )
 grep -q "frontier_default: .*worker=openai_gpt_5_2" "$PROFILES_OUT"
 grep -q "local_lab: .*worker=ollama_gemma4_26b" "$PROFILES_OUT"
+
+MLX_PROFILES_OUT="$TMP_ROOT/mlx-profiles.out"
+(
+  cd "$ROOT_DIR"
+  HOME="$CHECK_HOME" \
+  ANGELLA_LOCAL_WORKER_BACKEND=mlx \
+  ANGELLA_MLX_BASE_URL=http://127.0.0.1:11435/v1 \
+  ANGELLA_MLX_MODEL=mlx-community/gemma-4-31b-it-4bit \
+  ANGELLA_MLX_HEALTHCHECK_OK=1 \
+  bash setup.sh --list-harness-profiles >"$MLX_PROFILES_OUT" 2>/dev/null
+)
+grep -q "local_lab: .*worker=mlx_gemma4_31b_it_4bit" "$MLX_PROFILES_OUT"
 
 LEGACY_PROFILE_ERR="$TMP_ROOT/legacy-profile.err"
 if (
@@ -132,6 +159,44 @@ if (
   exit 1
 fi
 grep -q 'Legacy harness profile `default` has been removed' "$LEGACY_PROFILE_ERR"
+
+MLX_CHECK_OUT="$TMP_ROOT/mlx-check.out"
+MLX_CHECK_ERR="$TMP_ROOT/mlx-check.err"
+(
+  cd "$ROOT_DIR"
+  HOME="$CHECK_HOME" \
+  ANGELLA_LOCAL_WORKER_BACKEND=mlx \
+  ANGELLA_MLX_BASE_URL=http://127.0.0.1:11435/v1 \
+  ANGELLA_MLX_MODEL=mlx-community/gemma-4-31b-it-4bit \
+  ANGELLA_MLX_HEALTHCHECK_OK=1 \
+  bash setup.sh --check --worker-model mlx_gemma4_31b_it_4bit >"$MLX_CHECK_OUT" 2>"$MLX_CHECK_ERR"
+)
+grep -q "Template rendering checks passed" "$MLX_CHECK_OUT"
+grep -q "worker: angella_mlx_local/mlx-community/gemma-4-31b-it-4bit" "$MLX_CHECK_OUT"
+
+MLX_FAIL_ERR="$TMP_ROOT/mlx-fail.err"
+if (
+  cd "$ROOT_DIR"
+  HOME="$CHECK_HOME" \
+  ANGELLA_LOCAL_WORKER_BACKEND=mlx \
+  ANGELLA_MLX_BASE_URL=http://127.0.0.1:11435/v1 \
+  ANGELLA_MLX_MODEL=mlx-community/gemma-4-31b-it-4bit \
+  ANGELLA_MLX_HEALTHCHECK_OK=0 \
+  bash setup.sh --check --worker-model mlx_gemma4_31b_it_4bit >/dev/null 2>"$MLX_FAIL_ERR"
+); then
+  echo "mlx worker check unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -q 'ANGELLA_LOCAL_WORKER_BACKEND=mlx and ANGELLA_MLX_BASE_URL' "$MLX_FAIL_ERR"
+
+OLLAMA_CHECK_OUT="$TMP_ROOT/ollama-check.out"
+OLLAMA_CHECK_ERR="$TMP_ROOT/ollama-check.err"
+(
+  cd "$ROOT_DIR"
+  HOME="$CHECK_HOME" bash setup.sh --check --worker-model ollama_gemma4_26b >"$OLLAMA_CHECK_OUT" 2>"$OLLAMA_CHECK_ERR"
+)
+grep -q "worker: ollama/gemma4:26b" "$OLLAMA_CHECK_OUT"
+grep -q "existing .env.mlx detected" "$OLLAMA_CHECK_OUT"
 
 BOOTSTRAP_OUT="$TMP_ROOT/bootstrap.out"
 BOOTSTRAP_ERR="$TMP_ROOT/bootstrap.err"
@@ -162,6 +227,25 @@ test -f "$ROOT_DIR/.cache/angella/control-plane/install/telemetry.jsonl"
 grep -q '"rendered_hashes"' "$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
 grep -q '"overwrite_mode": "installed_new"' "$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
 grep -q "Setup Complete" "$INSTALL_OUT"
+
+MLX_INSTALL_HOME="$TMP_ROOT/home-install-mlx"
+mkdir -p "$MLX_INSTALL_HOME"
+MLX_INSTALL_OUT="$TMP_ROOT/install-mlx.out"
+MLX_INSTALL_ERR="$TMP_ROOT/install-mlx.err"
+(
+  cd "$ROOT_DIR"
+  HOME="$MLX_INSTALL_HOME" \
+  ANGELLA_LOCAL_WORKER_BACKEND=mlx \
+  ANGELLA_MLX_BASE_URL=http://127.0.0.1:11435/v1 \
+  ANGELLA_MLX_MODEL=mlx-community/gemma-4-31b-it-4bit \
+  ANGELLA_MLX_HEALTHCHECK_OK=1 \
+  bash setup.sh --install-only --worker-model mlx_gemma4_31b_it_4bit --yes >"$MLX_INSTALL_OUT" 2>"$MLX_INSTALL_ERR"
+)
+test -f "$MLX_INSTALL_HOME/.config/goose/custom_providers/angella_mlx_local.json"
+grep -q '"base_url": "http://127.0.0.1:11435/v1"' "$MLX_INSTALL_HOME/.config/goose/custom_providers/angella_mlx_local.json"
+grep -q '"name": "mlx-community/gemma-4-31b-it-4bit"' "$MLX_INSTALL_HOME/.config/goose/custom_providers/angella_mlx_local.json"
+grep -q 'GOOSE_PROVIDER: "angella_mlx_local"' "$MLX_INSTALL_HOME/.config/goose/config.yaml"
+grep -q 'GOOSE_MODEL: "mlx-community/gemma-4-31b-it-4bit"' "$MLX_INSTALL_HOME/.config/goose/config.yaml"
 
 AUTO_YES_HOME="$TMP_ROOT/home-auto-yes-overwrite"
 mkdir -p "$AUTO_YES_HOME/.config/goose/recipes"

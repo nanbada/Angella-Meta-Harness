@@ -41,6 +41,16 @@ def main() -> int:
     assert "공유 wiki 저장소 (현재 repo 내부 디렉터리)" in arch_text
     assert "다른 프로젝트와 외부 채널" in arch_text
     assert "다시 외부 경로 symlink로 바꿀 수" in arch_text
+    assert "ANGELLA_LOCAL_WORKER_BACKEND=mlx" in arch_text or "ANGELLA_LOCAL_WORKER_BACKEND" in arch_text
+
+    mlx_guide = (ROOT_DIR / "docs" / "setup-gemma4-mlx.md").read_text(encoding="utf-8")
+    assert "ANGELLA_LOCAL_WORKER_BACKEND=mlx" in mlx_guide
+    assert "ANGELLA_MLX_BASE_URL" in mlx_guide
+    assert "ANGELLA_MLX_MODEL" in mlx_guide
+    assert "angella_mlx_local" in mlx_guide
+    assert "git checkout codex/gemma4-default-finalize-meta-loop" not in mlx_guide
+    assert "config/harness-models.yaml" in mlx_guide
+    assert "수동 편집할 필요가 없습니다" in mlx_guide
 
     print("meta loop admin tests passed")
     return 0

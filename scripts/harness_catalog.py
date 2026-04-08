@@ -31,6 +31,35 @@ def _bool_env(name: str) -> bool:
     return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def effective_local_worker_backend() -> str:
+    backend = os.environ.get("ANGELLA_LOCAL_WORKER_BACKEND", "").strip().lower()
+    if backend:
+        return backend
+    if _first_env("ANGELLA_MLX_BASE_URL", "ANGELLA_MLX_MODEL", "ANGELLA_APFEL_BASE_URL", "ANGELLA_APFEL_MODEL"):
+        return "mlx"
+    return ""
+
+
+def effective_mlx_base_url() -> str:
+    return _first_env("ANGELLA_MLX_BASE_URL", "ANGELLA_APFEL_BASE_URL")
+
+
+def effective_mlx_model(default: str) -> str:
+    return _first_env("ANGELLA_MLX_MODEL", "ANGELLA_APFEL_MODEL") or default
+
+
+def effective_apfel_model(default: str) -> str:
+    return os.environ.get("ANGELLA_APFEL_MODEL", "").strip() or default
+
+
 def ollama_tags() -> dict:
     override = os.environ.get("ANGELLA_OLLAMA_TAGS_JSON")
     if override:
@@ -49,8 +78,8 @@ def model_present(tags: dict, model_name: str) -> bool:
     return any(item.get("name") == model_name for item in tags.get("models", []))
 
 
-def apfel_healthy(base_url: str) -> bool:
-    override = os.environ.get("ANGELLA_APFEL_HEALTHCHECK_OK")
+def local_openai_compatible_healthy(base_url: str, *, override_envs: tuple[str, ...]) -> bool:
+    override = _first_env(*override_envs)
     if override == "1":
         return True
     if override == "0":
@@ -66,6 +95,28 @@ def apfel_healthy(base_url: str) -> bool:
         except Exception:
             continue
     return False
+
+
+def mlx_healthy(base_url: str) -> bool:
+    return local_openai_compatible_healthy(
+        base_url,
+        override_envs=("ANGELLA_MLX_HEALTHCHECK_OK", "ANGELLA_APFEL_HEALTHCHECK_OK"),
+    )
+
+
+def apfel_healthy(base_url: str) -> bool:
+    return local_openai_compatible_healthy(
+        base_url,
+        override_envs=("ANGELLA_APFEL_HEALTHCHECK_OK", "ANGELLA_MLX_HEALTHCHECK_OK"),
+    )
+
+
+def resolved_runtime_model(model: dict) -> str:
+    if model["id"] == "mlx_gemma4_31b_it_4bit":
+        return effective_mlx_model(model["model"])
+    if model["id"] == "apfel_foundationmodel":
+        return effective_apfel_model(model["model"])
+    return model["model"]
 
 
 def availability_for_model(model: dict, tags: dict) -> tuple[bool, list[str], bool]:
@@ -94,6 +145,16 @@ def availability_for_model(model: dict, tags: dict) -> tuple[bool, list[str], bo
             key, expected = expr.split("=", 1)
             if os.environ.get(key) != expected:
                 reasons.append(f"missing_flag:{expr}")
+        elif check.startswith("local_worker_backend:"):
+            expected = check.split(":", 1)[1]
+            if effective_local_worker_backend() != expected:
+                reasons.append(f"missing_flag:ANGELLA_LOCAL_WORKER_BACKEND={expected}")
+        elif check == "mlx_health":
+            base_url = effective_mlx_base_url()
+            if not base_url:
+                reasons.append("missing_env:ANGELLA_MLX_BASE_URL")
+            elif not mlx_healthy(base_url):
+                reasons.append("mlx_healthcheck_failed")
         elif check == "apfel_health":
             base_url = os.environ.get("ANGELLA_APFEL_BASE_URL", "")
             if not base_url:
@@ -182,6 +243,7 @@ def resolve_catalog(models: list[dict]) -> list[dict]:
     for model in models:
         enabled, reasons, provisionable = availability_for_model(model, tags)
         item = dict(model)
+        item["model"] = resolved_runtime_model(item)
         item["enabled"] = enabled
         item["disabled_reason"] = ",".join(reasons)
         item["provisionable"] = provisionable
@@ -253,6 +315,19 @@ def resolve_selection(
 
     by_id = {model["id"]: model for model in resolved_models}
 
+    def unavailable_message(selected: dict) -> str:
+        if selected["id"] == "mlx_gemma4_31b_it_4bit":
+            return (
+                f"Model {selected['id']} is unavailable: {selected['disabled_reason']}. "
+                "Check ANGELLA_LOCAL_WORKER_BACKEND=mlx and ANGELLA_MLX_BASE_URL."
+            )
+        if selected["id"] == "apfel_foundationmodel":
+            return (
+                f"Model {selected['id']} is unavailable: {selected['disabled_reason']}. "
+                "Check ANGELLA_APFEL_BASE_URL or migrate to ANGELLA_MLX_BASE_URL."
+            )
+        return f"Model {selected['id']} is unavailable: {selected['disabled_reason']}"
+
     def select(role: str, selector: str, override: str | None, is_fallback: bool = False) -> dict:
         flag_key = f"fallback_{role}_required_flags" if is_fallback else f"{role}_required_flags"
         required_flags = profile.get("capability_flags", {}).get(flag_key, [])
@@ -269,7 +344,7 @@ def resolve_selection(
             if not all(flag in selected.get("flags", []) for flag in required_flags):
                 raise SystemExit(f"Model {override} does not satisfy required flags for {role}")
             if not selected["enabled"]:
-                raise SystemExit(f"Model {override} is unavailable: {selected['disabled_reason']}")
+                raise SystemExit(unavailable_message(selected))
             return selected
 
         selected, _ = choose_model(selector, [model for model in resolved_models if model["enabled"]], role, required_flags)
@@ -311,6 +386,7 @@ def resolve_selection(
         "planner": planner,
         "worker": worker,
         "capabilities": {
+            "mlx_enabled": worker["goose_provider"] == "angella_mlx_local",
             "apfel_enabled": worker["id"] == "apfel_foundationmodel",
             "mlx_preview_enabled": "preview" in worker.get("flags", []),
             "nvfp4_enabled": "preview" in worker.get("flags", []),
@@ -382,6 +458,10 @@ def print_shell_resolution(resolution: dict) -> None:
         "ANGELLA_WORKER_MODEL": worker["model"],
         "ANGELLA_WORKER_CONTEXT_LIMIT": str(worker["context_limit"]),
         "ANGELLA_WORKER_TEMPERATURE": str(worker["temperature_default"]),
+        "ANGELLA_LOCAL_WORKER_BACKEND": effective_local_worker_backend() or ("mlx" if capabilities["mlx_enabled"] else "ollama"),
+        "ANGELLA_MLX_BASE_URL": effective_mlx_base_url(),
+        "ANGELLA_MLX_MODEL": effective_mlx_model(worker["model"]) if capabilities["mlx_enabled"] else effective_mlx_model(""),
+        "ANGELLA_MLX_ENABLED": "true" if capabilities["mlx_enabled"] else "false",
         "ANGELLA_MLX_PREVIEW_ENABLED": "true" if capabilities["mlx_preview_enabled"] else "false",
         "ANGELLA_NVFP4_ENABLED": "true" if capabilities["nvfp4_enabled"] else "false",
         "ANGELLA_APFEL_ENABLED": "true" if capabilities["apfel_enabled"] else "false",

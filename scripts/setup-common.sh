@@ -32,6 +32,7 @@ ANGELLA_CONTROL_INSTALL_TELEMETRY_PATH="${ANGELLA_CONTROL_INSTALL_TELEMETRY_PATH
 ANGELLA_CUSTOM_PROVIDER_DIR="${ANGELLA_CUSTOM_PROVIDER_DIR:-${GOOSE_CONFIG_DIR}/custom_providers}"
 ANGELLA_HARNESS_MODELS_PATH="${ANGELLA_HARNESS_MODELS_PATH:-${SCRIPT_DIR}/config/harness-models.yaml}"
 ANGELLA_HARNESS_PROFILES_PATH="${ANGELLA_HARNESS_PROFILES_PATH:-${SCRIPT_DIR}/config/harness-profiles.yaml}"
+ANGELLA_MLX_TEMPLATE_PATH="${ANGELLA_MLX_TEMPLATE_PATH:-${SCRIPT_DIR}/config/custom-providers/mlx-local.json.template}"
 ANGELLA_APFEL_TEMPLATE_PATH="${ANGELLA_APFEL_TEMPLATE_PATH:-${SCRIPT_DIR}/config/custom-providers/apfel-local.json.template}"
 
 CHECK_RENDER_DIR="${CHECK_RENDER_DIR:-}"
@@ -49,6 +50,9 @@ HARNESS_PROFILE="${HARNESS_PROFILE:-}"
 LEAD_MODEL_OVERRIDE="${LEAD_MODEL_OVERRIDE:-}"
 PLANNER_MODEL_OVERRIDE="${PLANNER_MODEL_OVERRIDE:-}"
 WORKER_MODEL_OVERRIDE="${WORKER_MODEL_OVERRIDE:-}"
+ANGELLA_LOCAL_WORKER_BACKEND="${ANGELLA_LOCAL_WORKER_BACKEND:-}"
+ANGELLA_MLX_BASE_URL="${ANGELLA_MLX_BASE_URL:-}"
+ANGELLA_MLX_MODEL="${ANGELLA_MLX_MODEL:-}"
 ANGELLA_HARNESS_PROFILE_ID="${ANGELLA_HARNESS_PROFILE_ID:-}"
 ANGELLA_LEAD_MODEL_ID="${ANGELLA_LEAD_MODEL_ID:-}"
 ANGELLA_PLANNER_MODEL_ID="${ANGELLA_PLANNER_MODEL_ID:-}"
@@ -65,6 +69,7 @@ ANGELLA_WORKER_PROVIDER="${ANGELLA_WORKER_PROVIDER:-}"
 ANGELLA_WORKER_MODEL="${ANGELLA_WORKER_MODEL:-}"
 ANGELLA_WORKER_CONTEXT_LIMIT="${ANGELLA_WORKER_CONTEXT_LIMIT:-}"
 ANGELLA_WORKER_TEMPERATURE="${ANGELLA_WORKER_TEMPERATURE:-}"
+ANGELLA_MLX_ENABLED="${ANGELLA_MLX_ENABLED:-false}"
 ANGELLA_MLX_PREVIEW_ENABLED="${ANGELLA_MLX_PREVIEW_ENABLED:-false}"
 ANGELLA_NVFP4_ENABLED="${ANGELLA_NVFP4_ENABLED:-false}"
 ANGELLA_APFEL_ENABLED="${ANGELLA_APFEL_ENABLED:-false}"
@@ -205,6 +210,51 @@ resolve_env_mlx_path() {
     fi
 
     ENV_MLX_PATH="$SCRIPT_DIR/.env.mlx.example"
+}
+
+normalize_local_worker_env() {
+    local used_apfel_alias=false
+
+    if [ -z "${ANGELLA_MLX_BASE_URL:-}" ] && [ -n "${ANGELLA_APFEL_BASE_URL:-}" ]; then
+        ANGELLA_MLX_BASE_URL="$ANGELLA_APFEL_BASE_URL"
+        used_apfel_alias=true
+    fi
+
+    if [ -z "${ANGELLA_MLX_MODEL:-}" ] && [ -n "${ANGELLA_APFEL_MODEL:-}" ]; then
+        ANGELLA_MLX_MODEL="$ANGELLA_APFEL_MODEL"
+        used_apfel_alias=true
+    fi
+
+    if [ -z "${ANGELLA_LOCAL_WORKER_BACKEND:-}" ]; then
+        if [ -n "${ANGELLA_MLX_BASE_URL:-}" ] || [ -n "${ANGELLA_MLX_MODEL:-}" ]; then
+            ANGELLA_LOCAL_WORKER_BACKEND="mlx"
+        else
+            ANGELLA_LOCAL_WORKER_BACKEND="ollama"
+        fi
+    fi
+
+    export ANGELLA_LOCAL_WORKER_BACKEND ANGELLA_MLX_BASE_URL ANGELLA_MLX_MODEL
+
+    if [ "$used_apfel_alias" = true ] && [ "${ANGELLA_APFEL_ALIAS_WARNED:-false}" != "true" ]; then
+        warn "ANGELLA_APFEL_BASE_URL / ANGELLA_APFEL_MODEL are deprecated aliases. Use ANGELLA_MLX_BASE_URL / ANGELLA_MLX_MODEL."
+        ANGELLA_APFEL_ALIAS_WARNED=true
+        export ANGELLA_APFEL_ALIAS_WARNED
+    fi
+}
+
+load_mlx_environment() {
+    local verbose="${1:-false}"
+
+    resolve_env_mlx_path
+    if [ "$verbose" = true ]; then
+        info "Loading MLX environment variables from $(basename "$ENV_MLX_PATH")..."
+    fi
+    # shellcheck source=/dev/null
+    source "$ENV_MLX_PATH"
+    normalize_local_worker_env
+    if [ "$verbose" = true ]; then
+        ok "Environment variables loaded"
+    fi
 }
 
 escape_sed_replacement() {
@@ -361,6 +411,10 @@ write_harness_resolution_snapshot() {
   "worker_model": $(printf '%s' "$ANGELLA_WORKER_MODEL" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
   "worker_context_limit": $(printf '%s' "$ANGELLA_WORKER_CONTEXT_LIMIT"),
   "worker_temperature": $(printf '%s' "$ANGELLA_WORKER_TEMPERATURE"),
+  "local_worker_backend": $(printf '%s' "$ANGELLA_LOCAL_WORKER_BACKEND" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "mlx_base_url": $(printf '%s' "$ANGELLA_MLX_BASE_URL" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "mlx_model": $(printf '%s' "$ANGELLA_MLX_MODEL" | "$PYTHON_CMD" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'),
+  "mlx_enabled": $(printf '%s' "$ANGELLA_MLX_ENABLED"),
   "mlx_preview_enabled": $(printf '%s' "$ANGELLA_MLX_PREVIEW_ENABLED"),
   "nvfp4_enabled": $(printf '%s' "$ANGELLA_NVFP4_ENABLED"),
   "apfel_enabled": $(printf '%s' "$ANGELLA_APFEL_ENABLED"),
@@ -483,6 +537,10 @@ write_bootstrap_state() {
         write_shell_var "ANGELLA_WORKER_MODEL" "$ANGELLA_WORKER_MODEL"
         write_shell_var "ANGELLA_WORKER_CONTEXT_LIMIT" "$ANGELLA_WORKER_CONTEXT_LIMIT"
         write_shell_var "ANGELLA_WORKER_TEMPERATURE" "$ANGELLA_WORKER_TEMPERATURE"
+        write_shell_var "ANGELLA_LOCAL_WORKER_BACKEND" "$ANGELLA_LOCAL_WORKER_BACKEND"
+        write_shell_var "ANGELLA_MLX_BASE_URL" "$ANGELLA_MLX_BASE_URL"
+        write_shell_var "ANGELLA_MLX_MODEL" "$ANGELLA_MLX_MODEL"
+        write_shell_var "ANGELLA_MLX_ENABLED" "$ANGELLA_MLX_ENABLED"
         write_shell_var "ANGELLA_MLX_PREVIEW_ENABLED" "$ANGELLA_MLX_PREVIEW_ENABLED"
         write_shell_var "ANGELLA_NVFP4_ENABLED" "$ANGELLA_NVFP4_ENABLED"
         write_shell_var "ANGELLA_APFEL_ENABLED" "$ANGELLA_APFEL_ENABLED"
@@ -504,12 +562,26 @@ write_bootstrap_state() {
 }
 
 load_bootstrap_state() {
+    local preserved_local_worker_backend="${ANGELLA_LOCAL_WORKER_BACKEND-__ANGELLA_UNSET__}"
+    local preserved_mlx_base_url="${ANGELLA_MLX_BASE_URL-__ANGELLA_UNSET__}"
+    local preserved_mlx_model="${ANGELLA_MLX_MODEL-__ANGELLA_UNSET__}"
+
     if ! bootstrap_state_exists; then
         return 1
     fi
 
     # shellcheck disable=SC1090
     source "$ANGELLA_BOOTSTRAP_STATE_PATH"
+    if [ "$preserved_local_worker_backend" != "__ANGELLA_UNSET__" ]; then
+        ANGELLA_LOCAL_WORKER_BACKEND="$preserved_local_worker_backend"
+    fi
+    if [ "$preserved_mlx_base_url" != "__ANGELLA_UNSET__" ]; then
+        ANGELLA_MLX_BASE_URL="$preserved_mlx_base_url"
+    fi
+    if [ "$preserved_mlx_model" != "__ANGELLA_UNSET__" ]; then
+        ANGELLA_MLX_MODEL="$preserved_mlx_model"
+    fi
+    export ANGELLA_LOCAL_WORKER_BACKEND ANGELLA_MLX_BASE_URL ANGELLA_MLX_MODEL
     [ -n "${PYTHON_CMD:-}" ] && [ -x "$(command -v "$PYTHON_CMD" 2>/dev/null || true)" ] && return 0
     [ -x "$PYTHON_CMD" ]
 }
@@ -603,6 +675,22 @@ ensure_bootstrap_environment() {
     write_bootstrap_state
 }
 
+render_mlx_custom_provider() {
+    local target_path="${ANGELLA_CUSTOM_PROVIDER_DIR}/angella_mlx_local.json"
+    local base_url="${ANGELLA_MLX_BASE_URL:-}"
+    local model_name="${ANGELLA_MLX_MODEL:-mlx-community/gemma-4-31b-it-4bit}"
+
+    if [ -z "$base_url" ]; then
+        return 0
+    fi
+
+    mkdir -p "$ANGELLA_CUSTOM_PROVIDER_DIR"
+    sed \
+        -e "s|__ANGELLA_MLX_BASE_URL__|$(escape_sed_replacement "$base_url")|g" \
+        -e "s|__ANGELLA_MLX_MODEL__|$(escape_sed_replacement "$model_name")|g" \
+        "$ANGELLA_MLX_TEMPLATE_PATH" >"$target_path"
+}
+
 render_apfel_custom_provider() {
     local target_path="${ANGELLA_CUSTOM_PROVIDER_DIR}/angella_apfel_local.json"
     local base_url="${ANGELLA_APFEL_BASE_URL:-}"
@@ -619,9 +707,19 @@ render_apfel_custom_provider() {
         "$ANGELLA_APFEL_TEMPLATE_PATH" >"$target_path"
 }
 
+render_local_custom_providers() {
+    render_mlx_custom_provider
+
+    if [ -n "${ANGELLA_APFEL_BASE_URL:-}" ] || [ "$ANGELLA_WORKER_PROVIDER" = "angella_apfel_local" ]; then
+        render_apfel_custom_provider
+    fi
+}
+
 ensure_selected_worker_runtime() {
     if [ "$ANGELLA_WORKER_PROVIDER" = "ollama" ]; then
         pull_model "$ANGELLA_WORKER_MODEL"
+    elif [ "$ANGELLA_WORKER_PROVIDER" = "angella_mlx_local" ]; then
+        render_mlx_custom_provider
     elif [ "$ANGELLA_WORKER_PROVIDER" = "angella_apfel_local" ]; then
         render_apfel_custom_provider
     fi
@@ -749,11 +847,18 @@ ensure_models() {
         fi
 
         pull_model "$ANGELLA_WORKER_MODEL"
+    elif [ "$ANGELLA_WORKER_PROVIDER" = "angella_mlx_local" ]; then
+        if [ "$ANGELLA_MLX_ENABLED" = "true" ]; then
+            ok "MLX local worker is enabled"
+        else
+            warn "MLX worker selected but endpoint is not currently enabled."
+            warn "Check ANGELLA_LOCAL_WORKER_BACKEND=mlx and ANGELLA_MLX_BASE_URL."
+        fi
     elif [ "$ANGELLA_WORKER_PROVIDER" = "angella_apfel_local" ]; then
         if [ "$ANGELLA_APFEL_ENABLED" = "true" ]; then
-            ok "apfel custom provider is enabled"
+            ok "legacy apfel custom provider is enabled"
         else
-            warn "apfel worker selected but provider is not currently enabled."
+            warn "legacy apfel worker selected but provider is not currently enabled."
         fi
     fi
 }
@@ -1024,7 +1129,11 @@ print_summary() {
     echo "  Next steps:"
     echo ""
     echo "  1. 환경변수 적용:"
-    echo "     cp $SCRIPT_DIR/.env.mlx.example $SCRIPT_DIR/.env.mlx"
+    if [ -f "$SCRIPT_DIR/.env.mlx" ]; then
+        echo "     # existing .env.mlx detected"
+    else
+        echo "     cp $SCRIPT_DIR/.env.mlx.example $SCRIPT_DIR/.env.mlx"
+    fi
     echo "     source $SCRIPT_DIR/.env.mlx"
     echo ""
     echo "  Harness:"
@@ -1032,11 +1141,16 @@ print_summary() {
     echo "     lead: ${ANGELLA_LEAD_PROVIDER:-openai}/${ANGELLA_LEAD_MODEL:-gpt-5.2-pro}"
     echo "     planner: ${ANGELLA_PLANNER_PROVIDER:-openai}/${ANGELLA_PLANNER_MODEL:-gpt-5.2-pro}"
     echo "     worker: ${ANGELLA_WORKER_PROVIDER:-openai}/${ANGELLA_WORKER_MODEL:-gpt-5.2}"
+    echo "     local backend: ${ANGELLA_LOCAL_WORKER_BACKEND:-ollama}"
     echo "     mode: ${ANGELLA_EXECUTION_MODE:-frontier_primary}"
     echo "     worker tier: ${ANGELLA_WORKER_TIER:-frontier_primary}"
     echo "     fallback reason: ${ANGELLA_FALLBACK_REASON:-none}"
     echo "     local cache enabled: ${ANGELLA_LOCAL_CACHE_ENABLED:-false}"
     echo "     token saver enabled: ${ANGELLA_TOKEN_SAVER_ENABLED:-false}"
+    if [ "${ANGELLA_LOCAL_WORKER_BACKEND:-ollama}" = "mlx" ] || [ -n "${ANGELLA_MLX_BASE_URL:-}" ]; then
+        echo "     mlx endpoint: ${ANGELLA_MLX_BASE_URL:-not_configured}"
+        echo "     mlx model: ${ANGELLA_MLX_MODEL:-mlx-community/gemma-4-31b-it-4bit}"
+    fi
     echo ""
     if [ "$CHECK_ONLY" = false ] && [ "$BOOTSTRAP_ONLY" = false ] && [ "${ANGELLA_INSTALL_OVERWRITE_MODE:-not_run}" != "not_run" ]; then
         echo "  Install drift:"
