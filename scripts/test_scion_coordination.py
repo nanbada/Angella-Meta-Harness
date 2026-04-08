@@ -285,6 +285,85 @@ def main() -> int:
             assert "No direct conflicts detected" in _text(no_conflict)
             assert "angella-stale" not in _text(no_conflict)
 
+            os.environ["SCION_AGENT_ID"] = "angella-nested-owner"
+            nested_parent_claim = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_claim_files",
+                    "arguments": {
+                        "files": ["src/api"],
+                        "intent": "Own broad API area",
+                        "mode": "exclusive",
+                    },
+                }
+            )
+            assert "Claim mode: exclusive" in _text(nested_parent_claim)
+
+            os.environ["SCION_AGENT_ID"] = "angella-nested-child"
+            nested_takeover = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_claim_files",
+                    "arguments": {
+                        "files": ["src/api/server.py"],
+                        "mode": "takeover",
+                        "takeover_from": "angella-nested-owner",
+                        "intent": "Take over the API entrypoint only",
+                    },
+                }
+            )
+            nested_takeover_text = _text(nested_takeover)
+            assert "Claim mode: takeover" in nested_takeover_text
+            assert "Took over" in nested_takeover_text
+
+            parent_claim = json.loads((shared_dir / "claims" / "src" / "api.json").read_text(encoding="utf-8"))
+            assert parent_claim["exclusions"] == ["src/api/server.py"]
+
+            os.environ["SCION_AGENT_ID"] = "angella-nested-observer"
+            nested_query = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_query_peers",
+                    "arguments": {
+                        "query": "Can I edit the API entrypoint?",
+                        "candidate_files": ["src/api/server.py"],
+                    },
+                }
+            )
+            nested_query_text = _text(nested_query)
+            assert "angella-nested-child -> src/api/server.py" in nested_query_text
+            assert "angella-nested-owner -> src/api/server.py" not in nested_query_text
+
+            os.environ["SCION_AGENT_ID"] = "angella-nested-child"
+            nested_release = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_release_claims",
+                    "arguments": {
+                        "files": ["src/api/server.py"],
+                        "note": "handoff complete",
+                    },
+                }
+            )
+            assert "Released 1 claim(s)" in _text(nested_release)
+            assert not (shared_dir / "claims" / "src" / "api" / "server.py.json").exists()
+            restored_parent_claim = json.loads((shared_dir / "claims" / "src" / "api.json").read_text(encoding="utf-8"))
+            assert restored_parent_claim["exclusions"] == []
+
+            os.environ["SCION_AGENT_ID"] = "angella-nested-observer"
+            restored_query = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_query_peers",
+                    "arguments": {
+                        "query": "Can I edit the API entrypoint now?",
+                        "candidate_files": ["src/api/server.py"],
+                    },
+                }
+            )
+            restored_query_text = _text(restored_query)
+            assert "angella-nested-owner -> src/api/server.py (peer claim: src/api)" in restored_query_text
+
             repo_root = Path(tmp_root) / "repo"
             repo_root.mkdir(parents=True, exist_ok=True)
             subprocess.run(["git", "init", "-b", "main", str(repo_root)], check=True, capture_output=True, text=True)
