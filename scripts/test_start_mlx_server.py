@@ -25,6 +25,13 @@ def main() -> int:
     assert parsed_empty["path"] == "/"
 
     try:
+        start_mlx_server.parse_base_url("https://127.0.0.1:11435/v1")
+    except ValueError as exc:
+        assert "Unsupported MLX base URL scheme" in str(exc)
+    else:
+        raise AssertionError("expected invalid scheme failure")
+
+    try:
         start_mlx_server.parse_base_url("http://127.0.0.1:11435/foo")
     except ValueError as exc:
         assert "Unsupported MLX base URL path" in str(exc)

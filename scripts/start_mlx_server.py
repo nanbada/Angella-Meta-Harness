@@ -21,7 +21,7 @@ DEFAULT_MODEL = "mlx-community/gemma-4-31b-it-4bit"
 
 def parse_base_url(base_url: str) -> dict[str, object]:
     parsed = urlparse(base_url)
-    if parsed.scheme not in {"http", "https"}:
+    if parsed.scheme != "http":
         raise ValueError(f"Unsupported MLX base URL scheme: {parsed.scheme or '(missing)'}")
     if not parsed.hostname:
         raise ValueError("MLX base URL must include a host.")
@@ -34,7 +34,7 @@ def parse_base_url(base_url: str) -> dict[str, object]:
     return {
         "scheme": parsed.scheme,
         "host": parsed.hostname,
-        "port": parsed.port or (443 if parsed.scheme == "https" else 80),
+        "port": parsed.port or 80,
         "path": path or "/",
     }
 
