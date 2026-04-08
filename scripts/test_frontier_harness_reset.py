@@ -82,6 +82,22 @@ def main() -> int:
     assert private_mlx_payload["routing"]["worker_tier"] == "local_fallback"
     assert private_mlx_payload["routing"]["fallback_reason"] == "private_mode"
 
+    personal_default = _run(["resolve", "--profile", "personal_agent_tier", "--format", "json"], env=env)
+    assert personal_default.returncode == 0, personal_default.stderr
+    personal_default_payload = json.loads(personal_default.stdout)
+    assert personal_default_payload["worker"]["provider"] == "openai"
+
+    personal_local_context_env = dict(mlx_env)
+    personal_local_context_env["ANGELLA_LOCAL_CONTEXT_NEEDED"] = "true"
+    personal_local_context = _run(
+        ["resolve", "--profile", "personal_agent_tier", "--format", "json"],
+        env=personal_local_context_env,
+    )
+    assert personal_local_context.returncode == 0, personal_local_context.stderr
+    personal_local_context_payload = json.loads(personal_local_context.stdout)
+    assert personal_local_context_payload["worker"]["id"] == "mlx_gemma4_31b_it_4bit"
+    assert personal_local_context_payload["routing"]["fallback_reason"] == "local_context_needed"
+
     print("frontier harness reset tests passed")
     return 0
 

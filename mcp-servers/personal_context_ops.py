@@ -2,17 +2,22 @@
 """MCP Server for Personal OS Context & LLM-Wiki Ingestion."""
 
 import json
-import os
-import shutil
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
-# Setup raw directory mapping
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = PROJECT_ROOT / "knowledge" / "sources"
-RAW_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _project_root() -> Path:
+    return PROJECT_ROOT.resolve()
+
+
+def _raw_dir() -> Path:
+    raw_dir = (_project_root() / "knowledge" / "sources").resolve()
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    return raw_dir
 
 
 def read_clipboard() -> str:
@@ -88,7 +93,7 @@ def ingest_to_raw(source_identifier: str, content: str = None, is_file_path: boo
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_name = "".join(c if c.isalnum() else "_" for c in source_identifier)
     target_filename = f"{timestamp}_{safe_name}.md"
-    target_path = RAW_DIR / target_filename
+    target_path = _raw_dir() / target_filename
 
     try:
         if is_file_path and content is None:
@@ -103,7 +108,7 @@ def ingest_to_raw(source_identifier: str, content: str = None, is_file_path: boo
                 content = ""
             target_path.write_text(content, encoding="utf-8")
         
-        return f"Successfully ingested into raw: {target_path.relative_to(PROJECT_ROOT)}"
+        return f"Successfully ingested into raw: {target_path.relative_to(_project_root())}"
     except Exception as e:
         return f"Error ingesting to raw: {e}"
 

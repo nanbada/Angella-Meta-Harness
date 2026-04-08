@@ -11,6 +11,7 @@
 - **대상 하드웨어**: MacBook Pro M3 Pro (36GB RAM 권장)
 - **워커 모델**: `mlx-community/gemma-4-31b-it-4bit` (TurboQuant 최적화)
 - **Local Worker Contract**: MLX 경로는 `ANGELLA_LOCAL_WORKER_BACKEND=mlx`, `ANGELLA_MLX_BASE_URL`, `ANGELLA_MLX_MODEL`을 사용하는 OpenAI-compatible local endpoint topology를 canonical path로 삼습니다.
+- **Local LLM 역할 분리**: 로컬 구현/수정/다단계 reasoning worker는 Gemma 4 MLX를 우선 사용합니다. legacy `apfel_foundationmodel`은 단순 확인, 짧은 질문 응답, 저지연 보조 확인용으로만 유지하며 기본 coding worker로는 사용하지 않습니다.
 - **Tool-calling 보정**: Gemma 4의 네이티브 태그 파싱 오류를 하네스 단(`tool_parser_wrapper.py`)에서 가로채어 보정합니다.
 - **Swarm Coordination Stance**: Scion은 현재 실서비스 백플레인은 아니지만, Angella는 `.scion/shared` 또는 `SCION_SHARED_DIR` 기반의 file-backed coordination MVP를 통해 peer discovery, file claim, broadcast를 수행합니다.
 
@@ -39,8 +40,9 @@ Angella/
 ```
 
 ## 4. 로컬 캐시 및 환경 전략
-- **Shared Knowledge Path**: 현재 워크스페이스는 `knowledge/`를 repo 내부 디렉터리로 유지합니다. 핵심 요구사항은 경로 자체가 아니라 다른 프로젝트와 외부 채널(예: Telegram)에서도 접근 가능한 공유 가능성입니다. 필요하면 다시 외부 경로 symlink로 바꿀 수 있으며, 반대로 다른 소비자도 이 repo 내부 경로를 직접 참조할 수 있습니다.
+- **Repo-Local Knowledge Path**: `knowledge/`와 특히 `knowledge/sources/`는 현재 repo 내부 canonical 경로입니다. MCP helper는 더 이상 외부 knowledge root override를 해석하지 않고 이 내부 경로에만 읽기/쓰기를 수행합니다.
 - **MLX Runtime Inputs**: `setup.sh`는 `.env.mlx` 또는 `.env.mlx.example`를 bootstrap/check/install 단계에서 읽고, MLX worker 선택 시 Goose custom provider `angella_mlx_local`을 자동 렌더링합니다.
+- **Personal Agent Local Fallback Signal**: `personal_agent_tier`는 `ANGELLA_LOCAL_CONTEXT_NEEDED=true` 또는 `ANGELLA_PRIVATE_MODE=true`일 때 local worker fallback을 허용합니다.
 - **Bootstrap Env**: `.cache/angella/bootstrap-venv` (런타임 격리)
 - **Cache Paths**: `.cache/angella/uv`, `.cache/angella/pip`
 - **Scion Shared State**: 기본 경로는 `.scion/shared`이며, 필요하면 `SCION_SHARED_DIR`로 다른 공유 디렉터리나 worktree 간 coordination 경로를 지정할 수 있습니다.

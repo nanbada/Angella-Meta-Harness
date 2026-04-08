@@ -280,6 +280,8 @@ def _frontier_reachable(resolved_models: list[dict], role: str) -> bool:
 
 def _fallback_reason(profile: dict, resolved_models: list[dict]) -> str:
     active: list[str] = []
+    if _bool_env("ANGELLA_LOCAL_CONTEXT_NEEDED"):
+        active.append("local_context_needed")
     if _bool_env("ANGELLA_PRIVATE_MODE"):
         active.append("private_mode")
     if _bool_env("ANGELLA_FRONTIER_TOKEN_LIMITED"):

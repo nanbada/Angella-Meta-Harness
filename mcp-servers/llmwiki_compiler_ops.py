@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """MCP Server for LLM-Wiki Compiler."""
+
 import json
 import os
 import subprocess
@@ -8,31 +9,58 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-def run_npx_llmwiki(args: list) -> str:
-    """Invokes the llm-wiki-compiler via npx from the knowledge directory."""
-    
-    # Load .env.agents if it exists to supply API keys and potential path overrides
+def _load_runtime_env() -> dict[str, str]:
     env = os.environ.copy()
     env_agents = PROJECT_ROOT / ".env.agents"
     if env_agents.exists():
-        for line in env_agents.read_text().splitlines():
+        for line in env_agents.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
                 env[k.strip()] = v.strip()
 
-    # Use ANGELLA_KNOWLEDGE_DIR if set, otherwise default to linked 'knowledge' dir
-    knowledge_path_str = env.get("ANGELLA_KNOWLEDGE_DIR")
-    if knowledge_path_str:
-        knowledge_dir = Path(knowledge_path_str).expanduser().resolve()
-    else:
-        knowledge_dir = PROJECT_ROOT / "knowledge"
-        
+    # Knowledge lives in the repo-local tree; do not forward retired overrides.
+    env.pop("ANGELLA_KNOWLEDGE_DIR", None)
+    return env
+
+
+def _knowledge_dir() -> Path:
+    knowledge_dir = (PROJECT_ROOT / "knowledge").resolve()
     knowledge_dir.mkdir(parents=True, exist_ok=True)
+    return knowledge_dir
+
+
+def _sources_dir() -> Path:
+    sources_dir = (_knowledge_dir() / "sources").resolve()
+    sources_dir.mkdir(parents=True, exist_ok=True)
+    return sources_dir
+
+
+def _safe_note_stem(title: str) -> str:
+    stem = "".join(ch if ch.isalnum() else "_" for ch in title.strip())
+    stem = stem.strip("._")
+    while "__" in stem:
+        stem = stem.replace("__", "_")
+    if not stem:
+        raise ValueError("Title must include at least one letter or number.")
+    return stem
+
+
+def _note_path(title: str) -> Path:
+    sources_dir = _sources_dir()
+    path = (sources_dir / f"{_safe_note_stem(title)}.md").resolve()
+    if path.parent != sources_dir:
+        raise ValueError("Refusing to write outside knowledge/sources.")
+    return path
+
+
+def run_npx_llmwiki(args: list) -> str:
+    """Invokes llm-wiki-compiler from the repo-local knowledge directory."""
+
+    env = _load_runtime_env()
+    knowledge_dir = _knowledge_dir()
 
     try:
-        # Prompting npm/npx might ask "Need to install the following packages... Ok to proceed? (y)"
-        # Use --yes flag for npx
         cmd = ["npx", "--yes", "llm-wiki-compiler"] + args
         result = subprocess.run(
             cmd,
@@ -81,25 +109,21 @@ def handle_request(request: dict) -> dict:
         content = args.get("content")
         if not title or not content:
             return {"error": "Missing 'title' or 'content' argument."}
-        
-        # Determine knowledge path
-        env = os.environ.copy()
-        env_agents = PROJECT_ROOT / ".env.agents"
-        if env_agents.exists():
-            for line in env_agents.read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    env[k.strip()] = v.strip()
-        
-        knowledge_dir = Path(env.get("ANGELLA_KNOWLEDGE_DIR", PROJECT_ROOT / "knowledge"))
-        sources_dir = knowledge_dir / "sources"
-        sources_dir.mkdir(parents=True, exist_ok=True)
-        
-        file_path = sources_dir / f"{title.replace(' ', '_')}.md"
+
+        try:
+            file_path = _note_path(title)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
         file_path.write_text(f"# {title}\n\n{content}", encoding="utf-8")
-        
-        return {"content": [{"type": "text", "text": f"Successfully saved note to {file_path}. Run llmwiki_compile to index it."}]}
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Successfully saved note to {file_path}. Run llmwiki_compile to index it.",
+                }
+            ]
+        }
         
     else:
         return {"error": f"Unknown tool: {tool}"}

@@ -19,6 +19,8 @@ bash scripts/setup-vault.sh
 goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s
 ```
 
+기본 knowledge source root는 repo 내부 [`knowledge/sources/`](/Users/nanbada/projects/Angella/knowledge/sources)입니다. 로컬 구현/수정 worker는 Gemma 4 MLX를 기준으로 두고, apfel은 단순 확인/짧은 질문 보조용으로만 유지합니다.
+
 ## 📖 Documentation Map
 
 AI 에이전트와 사용자는 목적에 따라 아래 문서를 참조하세요.

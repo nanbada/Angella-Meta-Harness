@@ -23,10 +23,10 @@ def main() -> int:
         tmp_project_root = Path(tmp_root) / "project-root"
         tmp_project_root.mkdir(parents=True, exist_ok=True)
         knowledge_dir = tmp_project_root / "knowledge"
-        original_env = os.environ.get("ANGELLA_KNOWLEDGE_DIR")
         original_project_root = llmwiki_compiler_ops.PROJECT_ROOT
-        os.environ["ANGELLA_KNOWLEDGE_DIR"] = str(knowledge_dir)
+        original_personal_project_root = personal_context_ops.PROJECT_ROOT
         llmwiki_compiler_ops.PROJECT_ROOT = tmp_project_root
+        personal_context_ops.PROJECT_ROOT = tmp_project_root
 
         try:
             note_response = llmwiki_compiler_ops.handle_request(
@@ -44,31 +44,33 @@ def main() -> int:
             assert "deterministic" in note_path.read_text(encoding="utf-8")
             assert "Successfully saved note" in note_response["content"][0]["text"]
 
-            original_raw_dir = personal_context_ops.RAW_DIR
-            original_personal_project_root = personal_context_ops.PROJECT_ROOT
-            personal_context_ops.PROJECT_ROOT = tmp_project_root
-            personal_context_ops.RAW_DIR = knowledge_dir / "sources"
-            personal_context_ops.RAW_DIR.mkdir(parents=True, exist_ok=True)
-            try:
-                ingest_result = personal_context_ops.ingest_to_raw(
-                    "clipboard_dump",
-                    "alpha\nbeta\n",
-                    False,
-                )
-            finally:
-                personal_context_ops.RAW_DIR = original_raw_dir
-                personal_context_ops.PROJECT_ROOT = original_personal_project_root
-
+            ingest_result = personal_context_ops.ingest_to_raw(
+                "clipboard_dump",
+                "alpha\nbeta\n",
+                False,
+            )
             assert "Successfully ingested into raw" in ingest_result
             ingested = sorted((knowledge_dir / "sources").glob("*clipboard_dump.md"))
             assert ingested
             assert "alpha" in ingested[0].read_text(encoding="utf-8")
+
+            sanitized_response = llmwiki_compiler_ops.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "llmwiki_save_note",
+                    "arguments": {
+                        "title": "../../../escaped",
+                        "content": "stay inside sources",
+                    },
+                }
+            )
+            sanitized_path = knowledge_dir / "sources" / "escaped.md"
+            assert sanitized_path.is_file()
+            assert "Successfully saved note" in sanitized_response["content"][0]["text"]
+            assert not (Path(tmp_root) / "escaped.md").exists()
         finally:
             llmwiki_compiler_ops.PROJECT_ROOT = original_project_root
-            if original_env is None:
-                os.environ.pop("ANGELLA_KNOWLEDGE_DIR", None)
-            else:
-                os.environ["ANGELLA_KNOWLEDGE_DIR"] = original_env
+            personal_context_ops.PROJECT_ROOT = original_personal_project_root
 
         compacted = compact_output(
             "test_output",

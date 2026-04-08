@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression checks for shared knowledge path overrides."""
+"""Regression checks for repo-local knowledge path invariants."""
 
 from __future__ import annotations
 
@@ -48,19 +48,19 @@ def main() -> int:
             assert captured["env_knowledge_dir"] is None
 
             os.environ["ANGELLA_KNOWLEDGE_DIR"] = str(knowledge_dir)
-            output = llmwiki_compiler_ops.run_npx_llmwiki(["query", "shared knowledge"])
+            output = llmwiki_compiler_ops.run_npx_llmwiki(["query", "repo local knowledge still wins"])
             assert output == "ok"
-            assert captured["cmd"] == ["npx", "--yes", "llm-wiki-compiler", "query", "shared knowledge"]
-            assert Path(str(captured["cwd"])).resolve() == knowledge_dir.resolve()
-            assert captured["env_knowledge_dir"] == str(knowledge_dir)
+            assert captured["cmd"] == ["npx", "--yes", "llm-wiki-compiler", "query", "repo local knowledge still wins"]
+            assert Path(str(captured["cwd"])).resolve() == repo_local_knowledge.resolve()
+            assert captured["env_knowledge_dir"] is None
 
             response = llmwiki_compiler_ops.handle_request(
                 {
                     "type": "call_tool",
                     "name": "llmwiki_save_note",
                     "arguments": {
-                        "title": "Shared Knowledge Note",
-                        "content": "Angella shared wiki override works.",
+                        "title": "Repo Local Knowledge Note",
+                        "content": "Angella repo-local wiki path works.",
                     },
                 }
             )
@@ -72,9 +72,10 @@ def main() -> int:
             else:
                 os.environ["ANGELLA_KNOWLEDGE_DIR"] = original_env
 
-        saved_note = knowledge_dir / "sources" / "Shared_Knowledge_Note.md"
+        saved_note = repo_local_knowledge / "sources" / "Repo_Local_Knowledge_Note.md"
         assert saved_note.is_file()
-        assert "shared wiki override works" in saved_note.read_text(encoding="utf-8")
+        assert "repo-local wiki path works" in saved_note.read_text(encoding="utf-8")
+        assert not (knowledge_dir / "sources" / "Repo_Local_Knowledge_Note.md").exists()
         assert "Successfully saved note" in response["content"][0]["text"]
 
     print("optional provider tests passed")

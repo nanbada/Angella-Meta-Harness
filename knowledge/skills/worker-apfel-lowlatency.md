@@ -1,5 +1,5 @@
 # Worker Skill: apfel Low Latency
 
-- use for latency-sensitive local fallback or augment scenarios
+- use for low-latency local confirmation, short Q&A, or quick sanity checks
 - only activate when custom provider healthcheck succeeds
-- do not select as default coding worker unless latency is the primary objective
+- do not select as the default implementation or coding worker
