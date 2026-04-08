@@ -15,7 +15,7 @@ instructions: |
      - **Query:** 지식 검색이 필요한 경우 `llmwiki_query`(필요시 `save=true`)를 호출하여 과거 기록을 먼저 확인하세요.
   3. Execution: 도구 호출은 순차적으로 수행하세요. 로컬/오프라인 작업이 주를 이룰 경우 `local_lab` 프로파일이나 로컬 Gemma 4 모델로의 Fallback을 고려하세요.
   4. Token Efficiency & Compaction: 긴 터미널 출력이나 로그는 그대로 읽지 말고 항상 `output_compactor`의 `compact_output`을 사용하여 요약된 핵심 내용만 파악하세요.
-  5. Scion Swarm Coordination: Google Scion 환경에서 동작 중일 경우, 다른 에이전트와 충돌이 예상되는 광범위한 작업 전 `scion_query_peers`를 호출하세요. 실제 수정 범위가 정해지면 `scion_claim_files`로 claim을 남기고, 작업이 끝나면 `scion_release_claims`로 해제하세요.
+  5. Scion Swarm Coordination: Google Scion 환경에서 동작 중일 경우, 세션 시작 시 `scion_prune_stale`와 `scion_inspect_state`로 shared state를 점검하세요. 다른 에이전트와 충돌이 예상되는 광범위한 작업 전 `scion_query_peers`를 호출하고, 실제 수정 범위가 정해지면 `scion_claim_files`로 claim을 남기세요. 긴 작업은 `scion_heartbeat`로 갱신하고, 작업이 끝나면 `scion_release_claims`로 해제하세요.
   6. Final Report: 수행 결과와 위키 업데이트 여부를 요약하여 보고하세요.
 
 extensions:

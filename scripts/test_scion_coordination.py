@@ -70,6 +70,18 @@ def main() -> int:
             assert alpha_state["status"] == "active"
             assert alpha_state["claimed_files"] == ["docs/PARITY.md", "src/frontend"]
 
+            inspect = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_inspect_state",
+                    "arguments": {"event_limit": 5},
+                }
+            )
+            inspect_text = _text(inspect)
+            assert "Active agents:" in inspect_text
+            assert "angella-alpha status=active" in inspect_text
+            assert "Recent events:" in inspect_text
+
             os.environ["SCION_AGENT_ID"] = "angella-beta"
             query = module.handle_request(
                 {
@@ -85,6 +97,48 @@ def main() -> int:
             assert "Conflicts detected with active peers" in text
             assert "angella-alpha -> src/frontend" in text
 
+            strict_conflict = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_claim_files",
+                    "arguments": {
+                        "files": ["src/frontend"],
+                        "strict": True,
+                    },
+                }
+            )
+            assert "error" in strict_conflict
+            assert "Conflicting Scion claims detected" in strict_conflict["error"]
+
+            overlap_warning = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_claim_files",
+                    "arguments": {
+                        "files": ["src/frontend"],
+                        "strict": False,
+                    },
+                }
+            )
+            assert "Warning: overlapping claims" in _text(overlap_warning)
+
+            heartbeat = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_heartbeat",
+                    "arguments": {
+                        "status": "waiting",
+                        "message": "waiting for alpha to finish",
+                    },
+                }
+            )
+            assert "Heartbeat recorded" in _text(heartbeat)
+
+            beta_state = json.loads((shared_dir / "agents" / "angella-beta.json").read_text(encoding="utf-8"))
+            assert beta_state["status"] == "waiting"
+            assert beta_state["claimed_files"] == ["src/frontend"]
+
+            os.environ["SCION_AGENT_ID"] = "angella-alpha"
             release = module.handle_request(
                 {
                     "type": "call_tool",
@@ -96,9 +150,10 @@ def main() -> int:
                 }
             )
             assert "Released 1 claim(s)" in _text(release)
+            assert "docs/PARITY.md" not in _text(release)
 
-            beta_state = json.loads((shared_dir / "agents" / "angella-beta.json").read_text(encoding="utf-8"))
-            assert beta_state["claimed_files"] == []
+            alpha_state_after_release = json.loads((shared_dir / "agents" / "angella-alpha.json").read_text(encoding="utf-8"))
+            assert alpha_state_after_release["claimed_files"] == ["docs/PARITY.md"]
 
             stale_peer = {
                 "agent_id": "angella-stale",
@@ -117,6 +172,25 @@ def main() -> int:
                 encoding="utf-8",
             )
 
+            old_event_path = shared_dir / "events" / "1-angella-stale-broadcast.json"
+            old_event_path.parent.mkdir(parents=True, exist_ok=True)
+            old_event_path.write_text(
+                json.dumps({"agent_id": "angella-stale", "kind": "broadcast", "timestamp": "2000-01-01T00:00:00+00:00", "payload": {}}, indent=2),
+                encoding="utf-8",
+            )
+
+            prune = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_prune_stale",
+                    "arguments": {"event_retention_seconds": 60},
+                }
+            )
+            assert "Pruned 1 stale agent state file(s)" in _text(prune)
+            assert not (shared_dir / "agents" / "angella-stale.json").exists()
+            assert not old_event_path.exists()
+
+            os.environ["SCION_AGENT_ID"] = "angella-beta"
             no_conflict = module.handle_request(
                 {
                     "type": "call_tool",
@@ -127,7 +201,7 @@ def main() -> int:
                     },
                 }
             )
-            assert "No active Scion peers registered" in _text(no_conflict) or "No direct conflicts detected" in _text(no_conflict)
+            assert "No direct conflicts detected" in _text(no_conflict)
             assert "angella-stale" not in _text(no_conflict)
         finally:
             for key, value in original_env.items():

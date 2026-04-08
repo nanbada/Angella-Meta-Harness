@@ -29,7 +29,7 @@ Angella는 모델 독립적인 **지능형 하네스(Harness)**를 통해 에이
 
 ### Phase 7 (진행 중) - 군집 지능 (Swarm)
 - **Google Scion** 개념을 참조하는 file-backed coordination MVP 구현 (`.scion/shared`, `SCION_SHARED_DIR`).
-- 에이전트 간 file claim, broadcast, peer query를 통한 충돌 방지 조정 레이어 강화.
+- 에이전트 간 file claim, heartbeat, broadcast, peer query를 통한 충돌 방지 조정 레이어 강화.
 - 다음 단계: 실제 hub/backplane 연동과 multi-worktree orchestration 고도화.
 
 ## 4. 성공 지표

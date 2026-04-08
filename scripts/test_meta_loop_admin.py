@@ -36,6 +36,7 @@ def main() -> int:
     assert "retired on 2026-04-07" in parity_text
     assert "Lane 7 — retired meta-loop/control-plane surface removed" in parity_text
     assert "Lane 6 — google scion coordination (file-backed mvp)" in parity_text
+    assert "docs/scion-operations.md" in parity_text or "scripts/test_scion_coordination.py" in parity_text
 
     arch_text = (ROOT_DIR / "docs" / "arch-snapshot.md").read_text(encoding="utf-8")
     assert "file-backed coordination MVP" in arch_text
@@ -56,6 +57,19 @@ def main() -> int:
     roadmap_text = (ROOT_DIR / "plan.md").read_text(encoding="utf-8")
     assert "Phase 7 (진행 중)" in roadmap_text
     assert "file-backed coordination MVP" in roadmap_text
+
+    scion_ops = (ROOT_DIR / "docs" / "scion-operations.md").read_text(encoding="utf-8")
+    assert "SCION_SHARED_DIR" in scion_ops
+    assert "scion_prune_stale" in scion_ops
+    assert "scion_inspect_state" in scion_ops
+    assert "scion_heartbeat" in scion_ops
+    assert "scion_claim_files" in scion_ops
+    assert "scion_release_claims" in scion_ops
+
+    scion_sop = (ROOT_DIR / "knowledge" / "sops" / "scion-swarm-operations.md").read_text(encoding="utf-8")
+    assert "scion_prune_stale" in scion_sop
+    assert "scion_inspect_state" in scion_sop
+    assert "scion_heartbeat" in scion_sop
 
     print("meta loop admin tests passed")
     return 0

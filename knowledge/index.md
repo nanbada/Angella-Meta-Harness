@@ -23,6 +23,7 @@ This file is the canonical entry point for tracked harness knowledge.
 - [Failure Harvest And Promotion SOP](sops/failure-harvest-and-promotion.md)
 - [Failure Pattern: meta_loop_policy_gap](sops/failure-meta-loop-policy-gap.md)
 - [Frontier Lead Selection SOP](sops/frontier-lead-selection.md)
+- [Scion Swarm Operations SOP](sops/scion-swarm-operations.md)
 
 ## Worker Patterns
 
@@ -76,5 +77,6 @@ This file is the canonical entry point for tracked harness knowledge.
 - [docs/spec-contracts.md](../docs/spec-contracts.md)
 - [docs/PARITY.md](../docs/PARITY.md)
 - [plan.md](../plan.md)
+- [docs/scion-operations.md](../docs/scion-operations.md)
 
 Historical mirrors of retired or archived docs remain under [knowledge/sources/](sources/index.md).

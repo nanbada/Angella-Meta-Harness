@@ -92,6 +92,10 @@ def _agent_state_path(agent_id: str) -> Path:
     return _agents_dir() / f"{agent_id}.json"
 
 
+def _event_timestamp_prefix() -> int:
+    return int(_utc_now().timestamp() * 1000)
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", delete=False, dir=str(path.parent), encoding="utf-8") as handle:
@@ -190,6 +194,19 @@ def _active_peers(self_id: str) -> list[dict[str, Any]]:
     return peers
 
 
+def _all_fresh_agents() -> list[dict[str, Any]]:
+    agents: list[dict[str, Any]] = []
+    for path in sorted(_agents_dir().glob("*.json")):
+        try:
+            state = _read_json(path)
+        except Exception:
+            continue
+        if not _fresh(state):
+            continue
+        agents.append(state)
+    return agents
+
+
 def _overlap(candidate_files: list[str], peer_files: list[str]) -> list[str]:
     candidate = set(_normalize_paths(candidate_files))
     peer = set(_normalize_paths(peer_files))
@@ -223,6 +240,100 @@ def _summary_for_query(peers: list[dict[str, Any]], candidate_files: list[str]) 
     if overlaps:
         return "Conflicts detected with active peers:\n" + "\n".join(overlaps) + "\n\nActive peers:\n" + "\n".join(peer_lines)
     return "No direct conflicts detected.\n\nActive peers:\n" + "\n".join(peer_lines)
+
+
+def _conflicts_for_files(self_id: str, candidate_files: list[str]) -> list[dict[str, Any]]:
+    conflicts: list[dict[str, Any]] = []
+    for peer in _active_peers(self_id):
+        overlap = _overlap(candidate_files, peer.get("claimed_files", []))
+        if overlap:
+            conflicts.append(
+                {
+                    "agent_id": peer["agent_id"],
+                    "files": overlap,
+                    "status": peer.get("status", "unknown"),
+                    "intent": peer.get("intent", ""),
+                    "message": peer.get("message", ""),
+                }
+            )
+    return conflicts
+
+
+def _recent_events(limit: int = 10) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for path in sorted(_events_dir().glob("*.json"), reverse=True)[:limit]:
+        try:
+            payload = _read_json(path)
+        except Exception:
+            continue
+        payload["_path"] = path.name
+        events.append(payload)
+    return events
+
+
+def _inspect_state_text(*, include_events: bool = True, event_limit: int = 10) -> str:
+    agents = _all_fresh_agents()
+    lines: list[str] = [f"Shared dir: {_shared_dir()}"]
+    if not agents:
+        lines.append("Active agents: none")
+    else:
+        lines.append("Active agents:")
+        for agent in agents:
+            line = f"- {agent['agent_id']} status={agent.get('status', 'unknown')}"
+            claims = agent.get("claimed_files", [])
+            if claims:
+                line += f" claims={','.join(claims)}"
+            intent = agent.get("intent", "")
+            if intent:
+                line += f" intent={intent}"
+            message = agent.get("message", "")
+            if message:
+                line += f" message={message}"
+            lines.append(line)
+
+    if include_events:
+        events = _recent_events(limit=event_limit)
+        if not events:
+            lines.append("Recent events: none")
+        else:
+            lines.append("Recent events:")
+            for event in events:
+                lines.append(
+                    f"- {event['_path']} kind={event.get('kind', 'unknown')} agent={event.get('agent_id', 'unknown')}"
+                )
+    return "\n".join(lines)
+
+
+def _prune_stale(*, event_retention_seconds: int = 86400) -> dict[str, Any]:
+    now = time.time()
+    stale_agents: list[str] = []
+    pruned_events: list[str] = []
+
+    for path in sorted(_agents_dir().glob("*.json")):
+        try:
+            state = _read_json(path)
+        except Exception:
+            path.unlink(missing_ok=True)
+            stale_agents.append(path.name)
+            continue
+        if not _fresh(state):
+            path.unlink(missing_ok=True)
+            stale_agents.append(path.name)
+
+    cutoff = now - max(60, event_retention_seconds)
+    for path in sorted(_events_dir().glob("*.json")):
+        try:
+            prefix = int(path.name.split("-", 1)[0])
+        except Exception:
+            continue
+        if prefix / 1000.0 < cutoff:
+            path.unlink(missing_ok=True)
+            pruned_events.append(path.name)
+
+    return {
+        "stale_agents_removed": stale_agents,
+        "events_removed": pruned_events,
+    }
 
 
 def handle_request(request: dict) -> dict:
@@ -266,6 +377,11 @@ def handle_request(request: dict) -> dict:
         files = _normalize_paths(args.get("files"))
         if not files:
             return {"error": "Missing 'files' argument."}
+        conflicts = _conflicts_for_files(agent_id, files)
+        strict = bool(args.get("strict", False))
+        if strict and conflicts:
+            conflict_text = "; ".join(f"{item['agent_id']} -> {', '.join(item['files'])}" for item in conflicts)
+            return {"error": f"Conflicting Scion claims detected: {conflict_text}"}
         state = _load_agent_state(agent_id)
         current = set(_normalize_paths(state.get("claimed_files", [])))
         current.update(files)
@@ -282,18 +398,25 @@ def handle_request(request: dict) -> dict:
         )
         _record_event(agent_id, "claim", {"files": files, "intent": intent})
         text = f"Claimed {len(files)} file(s) for {agent_id}: {', '.join(files)}"
+        if conflicts:
+            conflict_text = "; ".join(f"{item['agent_id']} -> {', '.join(item['files'])}" for item in conflicts)
+            text += f"\nWarning: overlapping claims with {conflict_text}"
         return {"content": [{"type": "text", "text": text}]}
 
     if tool == "scion_release_claims":
         files = _normalize_paths(args.get("files", []))
         state = _load_agent_state(agent_id)
         current = _normalize_paths(state.get("claimed_files", []))
+        current_set = set(current)
         if files:
-            remaining = [item for item in current if item not in set(files)]
+            requested = set(files)
+            released = [item for item in current if item in requested]
+            remaining = [item for item in current if item not in requested]
         else:
+            released = current
             remaining = []
         status = "idle" if not remaining else state.get("status", "active")
-        saved = _save_agent_state(
+        _save_agent_state(
             agent_id,
             status=status,
             intent=state.get("intent", ""),
@@ -302,9 +425,40 @@ def handle_request(request: dict) -> dict:
             metadata=state.get("metadata", {}),
             ttl_seconds=args.get("ttl_seconds"),
         )
-        _record_event(agent_id, "release", {"released_files": files or current, "remaining_files": saved.get("claimed_files", [])})
-        released = files or current
+        _record_event(agent_id, "release", {"released_files": released, "remaining_files": remaining})
         text = f"Released {len(released)} claim(s) for {agent_id}."
+        if files and len(released) != len(files):
+            missing = [item for item in files if item not in current_set]
+            if missing:
+                text += f"\nNot currently claimed: {', '.join(missing)}"
+        return {"content": [{"type": "text", "text": text}]}
+
+    if tool == "scion_heartbeat":
+        state = _load_agent_state(agent_id)
+        ttl_seconds = args.get("ttl_seconds")
+        saved = _save_agent_state(
+            agent_id,
+            status=args.get("status", state.get("status", "active")),
+            intent=args.get("intent", state.get("intent", "")),
+            message=args.get("message", state.get("message", "")),
+            claimed_files=state.get("claimed_files", []),
+            metadata=state.get("metadata", {}),
+            ttl_seconds=ttl_seconds,
+        )
+        _record_event(agent_id, "heartbeat", {"status": saved.get("status", "unknown")})
+        return {"content": [{"type": "text", "text": f"Heartbeat recorded for {agent_id}."}]}
+
+    if tool == "scion_inspect_state":
+        include_events = bool(args.get("include_events", True))
+        event_limit = int(args.get("event_limit", 10))
+        return {"content": [{"type": "text", "text": _inspect_state_text(include_events=include_events, event_limit=event_limit)}]}
+
+    if tool == "scion_prune_stale":
+        result = _prune_stale(event_retention_seconds=int(args.get("event_retention_seconds", 86400)))
+        text = (
+            f"Pruned {len(result['stale_agents_removed'])} stale agent state file(s) "
+            f"and {len(result['events_removed'])} expired event(s)."
+        )
         return {"content": [{"type": "text", "text": text}]}
 
     if tool == "scion_query_peers":
@@ -366,6 +520,40 @@ if __name__ == "__main__":
                                     "files": {"type": "array", "items": {"type": "string"}, "description": "Optional subset of files to release. Omit to release all claims."},
                                     "note": {"type": "string", "description": "Optional note to leave when releasing claims."},
                                     "ttl_seconds": {"type": "integer", "description": "Optional TTL for the updated agent state."},
+                                },
+                            },
+                        },
+                        {
+                            "name": "scion_heartbeat",
+                            "description": "Refreshes the current agent's TTL and status without changing its claimed files.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "status": {"type": "string", "description": "Optional updated status label."},
+                                    "intent": {"type": "string", "description": "Optional updated intent summary."},
+                                    "message": {"type": "string", "description": "Optional updated status message."},
+                                    "ttl_seconds": {"type": "integer", "description": "Optional TTL for the refreshed state."},
+                                },
+                            },
+                        },
+                        {
+                            "name": "scion_inspect_state",
+                            "description": "Inspects the current file-backed Scion shared state and recent events.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "include_events": {"type": "boolean", "description": "Whether to include recent events."},
+                                    "event_limit": {"type": "integer", "description": "Maximum number of recent events to list."},
+                                },
+                            },
+                        },
+                        {
+                            "name": "scion_prune_stale",
+                            "description": "Removes expired agent state files and old event files from the shared Scion directory.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "event_retention_seconds": {"type": "integer", "description": "Retention window for event files."},
                                 },
                             },
                         },

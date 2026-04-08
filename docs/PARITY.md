@@ -50,6 +50,7 @@ Last updated: 2026-04-08
 - Evidence: `recipes/autoresearch-loop.yaml`
 - Evidence: `scripts/test_scion_coordination.py`
 - Evidence: `docs/arch-snapshot.md`
+- Evidence: `docs/scion-operations.md`
 
 ## Lane 7 — retired meta-loop/control-plane surface removed
 

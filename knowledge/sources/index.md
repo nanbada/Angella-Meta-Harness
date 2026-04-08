@@ -44,6 +44,7 @@ Tracked raw-source mirror pages used by the harness wiki.
 - [docs/arch-snapshot.md](../../docs/arch-snapshot.md)
 - [docs/spec-contracts.md](../../docs/spec-contracts.md)
 - [docs/PARITY.md](../../docs/PARITY.md)
+- [docs/scion-operations.md](../../docs/scion-operations.md)
 - [plan.md](../../plan.md)
 
 Archived or retired document mirrors remain listed above as historical sources.
