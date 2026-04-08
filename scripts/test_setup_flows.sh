@@ -196,7 +196,9 @@ OLLAMA_CHECK_ERR="$TMP_ROOT/ollama-check.err"
   HOME="$CHECK_HOME" bash setup.sh --check --worker-model ollama_gemma4_26b >"$OLLAMA_CHECK_OUT" 2>"$OLLAMA_CHECK_ERR"
 )
 grep -q "worker: ollama/gemma4:26b" "$OLLAMA_CHECK_OUT"
-grep -q "existing .env.mlx detected" "$OLLAMA_CHECK_OUT"
+if ! grep -q "existing .env.mlx detected" "$OLLAMA_CHECK_OUT"; then
+  grep -q "cp $ROOT_DIR/.env.mlx.example $ROOT_DIR/.env.mlx" "$OLLAMA_CHECK_OUT"
+fi
 
 BOOTSTRAP_OUT="$TMP_ROOT/bootstrap.out"
 BOOTSTRAP_ERR="$TMP_ROOT/bootstrap.err"
