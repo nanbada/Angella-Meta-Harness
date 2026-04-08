@@ -253,8 +253,13 @@ def resolve_selection(
 
     by_id = {model["id"]: model for model in resolved_models}
 
-    def select(role: str, selector: str, override: str | None) -> dict:
-        required_flags = profile.get("capability_flags", {}).get(f"{role}_required_flags", [])
+    def select(role: str, selector: str, override: str | None, is_fallback: bool = False) -> dict:
+        flag_key = f"fallback_{role}_required_flags" if is_fallback else f"{role}_required_flags"
+        required_flags = profile.get("capability_flags", {}).get(flag_key, [])
+        if not required_flags and is_fallback:
+            # Fall back to standard required flags if no fallback-specific flags are set
+            required_flags = profile.get("capability_flags", {}).get(f"{role}_required_flags", [])
+
         if override:
             selected = by_id.get(override)
             if selected is None:
@@ -277,13 +282,15 @@ def resolve_selection(
 
     fallback_reason = ""
     worker_selector = profile["worker_selector"]
+    is_fallback = False
     if worker_override:
         worker = select("worker", worker_selector, worker_override)
     else:
         fallback_reason = _fallback_reason(profile, resolved_models)
         if fallback_reason and profile.get("fallback_worker_selector"):
             worker_selector = profile["fallback_worker_selector"]
-        worker = select("worker", worker_selector, None)
+            is_fallback = True
+        worker = select("worker", worker_selector, None, is_fallback=is_fallback)
 
     worker_tier = profile.get("worker_tier_default", "frontier_primary")
     if worker.get("tier") == "local":

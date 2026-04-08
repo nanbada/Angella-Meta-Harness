@@ -11,7 +11,6 @@ GOOSE_CONFIG_DIR="${HOME}/.config/goose"
 GOOSE_RECIPE_DIR="${GOOSE_CONFIG_DIR}/recipes"
 RENDERED_CONFIG_PATH="${GOOSE_CONFIG_DIR}/config.yaml"
 RENDERED_RECIPE_PATH="${GOOSE_RECIPE_DIR}/autoresearch-loop.yaml"
-RENDERED_HARNESS_SELF_OPTIMIZE_PATH="${GOOSE_RECIPE_DIR}/harness-self-optimize.yaml"
 RENDERED_SUB_RECIPE_DIR="${GOOSE_RECIPE_DIR}/sub"
 
 ANGELLA_CACHE_DIR="${ANGELLA_CACHE_DIR:-${SCRIPT_DIR}/.cache/angella}"
@@ -227,7 +226,6 @@ render_template() {
     local escaped_root
     local escaped_python
     local escaped_recipe_path
-    local escaped_harness_self_optimize_path
     local escaped_goose_provider
     local escaped_goose_model
     local escaped_goose_temperature
@@ -241,7 +239,6 @@ render_template() {
     escaped_root="$(escape_sed_replacement "$SCRIPT_DIR")"
     escaped_python="$(escape_sed_replacement "$PYTHON_CMD")"
     escaped_recipe_path="$(escape_sed_replacement "$RENDERED_RECIPE_PATH")"
-    escaped_harness_self_optimize_path="$(escape_sed_replacement "$RENDERED_HARNESS_SELF_OPTIMIZE_PATH")"
     escaped_goose_provider="$(escape_sed_replacement "${ANGELLA_WORKER_PROVIDER:-openai}")"
     escaped_goose_model="$(escape_sed_replacement "${ANGELLA_WORKER_MODEL:-gpt-5.2}")"
     escaped_goose_temperature="$(escape_sed_replacement "${ANGELLA_WORKER_TEMPERATURE:-0.3}")"
@@ -257,7 +254,6 @@ render_template() {
         -e "s|__ANGELLA_ROOT__|$escaped_root|g" \
         -e "s|__PYTHON_CMD__|$escaped_python|g" \
         -e "s|__RENDERED_RECIPE_PATH__|$escaped_recipe_path|g" \
-        -e "s|__RENDERED_HARNESS_SELF_OPTIMIZE_PATH__|$escaped_harness_self_optimize_path|g" \
         -e "s|__GOOSE_PROVIDER__|$escaped_goose_provider|g" \
         -e "s|__GOOSE_MODEL__|$escaped_goose_model|g" \
         -e "s|__GOOSE_TEMPERATURE__|$escaped_goose_temperature|g" \
@@ -278,7 +274,7 @@ render_template() {
 verify_rendered_template() {
     local rendered_path=$1
 
-    if grep -Eq '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__|__RENDERED_HARNESS_SELF_OPTIMIZE_PATH__' "$rendered_path"; then
+    if grep -Eq '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__' "$rendered_path"; then
         fail "Unresolved template placeholder found in $rendered_path"
         return 1
     fi
@@ -401,7 +397,6 @@ write_install_state_summary() {
         "$ANGELLA_CONTROL_INSTALL_TELEMETRY_PATH" \
         "$RENDERED_CONFIG_PATH" \
         "$RENDERED_RECIPE_PATH" \
-        "$RENDERED_HARNESS_SELF_OPTIMIZE_PATH" \
         "$RENDERED_SUB_RECIPE_DIR/code-optimize.yaml" \
         "$RENDERED_SUB_RECIPE_DIR/evaluate-metric.yaml" <<'PY'
 import datetime as dt
@@ -412,7 +407,7 @@ import sys
 
 summary_path = pathlib.Path(sys.argv[1])
 telemetry_path = pathlib.Path(sys.argv[2])
-config_path, autoresearch_path, harness_path, code_path, eval_path = sys.argv[3:8]
+config_path, autoresearch_path, code_path, eval_path = sys.argv[3:7]
 
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
@@ -453,7 +448,6 @@ summary_payload = {
     "paths": {
         "config": config_path,
         "autoresearch_loop": autoresearch_path,
-        "harness_self_optimize": harness_path,
         "code_optimize": code_path,
         "evaluate_metric": eval_path,
     },
@@ -801,18 +795,15 @@ load_python_for_install_stage() {
 render_all_templates() {
     local config_target=$1
     local recipe_target=$2
-    local harness_recipe_target=$3
-    local sub_recipe_dir=$4
+    local sub_recipe_dir=$3
 
     verify_template_source_portable "$SCRIPT_DIR/config/goose-config.yaml"
     verify_template_source_portable "$SCRIPT_DIR/recipes/autoresearch-loop.yaml"
-    verify_template_source_portable "$SCRIPT_DIR/recipes/harness-self-optimize.yaml"
     verify_template_source_portable "$SCRIPT_DIR/recipes/sub/code-optimize.yaml"
     verify_template_source_portable "$SCRIPT_DIR/recipes/sub/evaluate-metric.yaml"
 
     render_and_verify "$SCRIPT_DIR/config/goose-config.yaml" "$config_target"
     render_and_verify "$SCRIPT_DIR/recipes/autoresearch-loop.yaml" "$recipe_target"
-    render_and_verify "$SCRIPT_DIR/recipes/harness-self-optimize.yaml" "$harness_recipe_target"
     render_and_verify "$SCRIPT_DIR/recipes/sub/code-optimize.yaml" "$sub_recipe_dir/code-optimize.yaml"
     render_and_verify "$SCRIPT_DIR/recipes/sub/evaluate-metric.yaml" "$sub_recipe_dir/evaluate-metric.yaml"
 }
@@ -823,7 +814,6 @@ check_templates_only() {
     render_all_templates \
         "$CHECK_RENDER_DIR/config.yaml" \
         "$CHECK_RENDER_DIR/autoresearch-loop.yaml" \
-        "$CHECK_RENDER_DIR/harness-self-optimize.yaml" \
         "$CHECK_RENDER_DIR/sub"
     ok "Template rendering checks passed"
 }
@@ -832,17 +822,14 @@ install_templates() {
     local render_dir
     local rendered_config_path
     local rendered_recipe_path
-    local rendered_harness_path
     local rendered_code_path
     local rendered_eval_path
     local existing_config_hash
     local existing_recipe_hash
-    local existing_harness_hash
     local existing_code_hash
     local existing_eval_hash
     local rendered_config_hash
     local rendered_recipe_hash
-    local rendered_harness_hash
     local rendered_code_hash
     local rendered_eval_hash
     local applied_hashes_json
@@ -853,44 +840,37 @@ install_templates() {
     render_dir="$(mktemp -d)"
     rendered_config_path="$render_dir/config.yaml"
     rendered_recipe_path="$render_dir/autoresearch-loop.yaml"
-    rendered_harness_path="$render_dir/harness-self-optimize.yaml"
     rendered_code_path="$render_dir/sub/code-optimize.yaml"
     rendered_eval_path="$render_dir/sub/evaluate-metric.yaml"
 
     render_all_templates \
         "$rendered_config_path" \
         "$rendered_recipe_path" \
-        "$rendered_harness_path" \
         "$render_dir/sub"
 
     existing_config_hash="$(sha256_file "$RENDERED_CONFIG_PATH")"
     existing_recipe_hash="$(sha256_file "$RENDERED_RECIPE_PATH")"
-    existing_harness_hash="$(sha256_file "$RENDERED_HARNESS_SELF_OPTIMIZE_PATH")"
     existing_code_hash="$(sha256_file "$RENDERED_SUB_RECIPE_DIR/code-optimize.yaml")"
     existing_eval_hash="$(sha256_file "$RENDERED_SUB_RECIPE_DIR/evaluate-metric.yaml")"
 
     rendered_config_hash="$(sha256_file "$rendered_config_path")"
     rendered_recipe_hash="$(sha256_file "$rendered_recipe_path")"
-    rendered_harness_hash="$(sha256_file "$rendered_harness_path")"
     rendered_code_hash="$(sha256_file "$rendered_code_path")"
     rendered_eval_hash="$(sha256_file "$rendered_eval_path")"
 
     ANGELLA_INSTALL_PREEXISTING_HASHES_JSON="$(hash_dict_json \
         config "$RENDERED_CONFIG_PATH" \
         autoresearch_loop "$RENDERED_RECIPE_PATH" \
-        harness_self_optimize "$RENDERED_HARNESS_SELF_OPTIMIZE_PATH" \
         code_optimize "$RENDERED_SUB_RECIPE_DIR/code-optimize.yaml" \
         evaluate_metric "$RENDERED_SUB_RECIPE_DIR/evaluate-metric.yaml")"
     ANGELLA_INSTALL_RENDERED_HASHES_JSON="$(hash_dict_json \
         config "$rendered_config_path" \
         autoresearch_loop "$rendered_recipe_path" \
-        harness_self_optimize "$rendered_harness_path" \
         code_optimize "$rendered_code_path" \
         evaluate_metric "$rendered_eval_path")"
 
     [ -n "$existing_config_hash" ] && [ "$existing_config_hash" != "$rendered_config_hash" ] && drift_targets+=("config")
     [ -n "$existing_recipe_hash" ] && [ "$existing_recipe_hash" != "$rendered_recipe_hash" ] && drift_targets+=("autoresearch_loop")
-    [ -n "$existing_harness_hash" ] && [ "$existing_harness_hash" != "$rendered_harness_hash" ] && drift_targets+=("harness_self_optimize")
     [ -n "$existing_code_hash" ] && [ "$existing_code_hash" != "$rendered_code_hash" ] && drift_targets+=("code_optimize")
     [ -n "$existing_eval_hash" ] && [ "$existing_eval_hash" != "$rendered_eval_hash" ] && drift_targets+=("evaluate_metric")
 
@@ -904,7 +884,6 @@ install_templates() {
 
     mkdir -p "$GOOSE_RECIPE_DIR" "$RENDERED_SUB_RECIPE_DIR"
     cp "$rendered_recipe_path" "$RENDERED_RECIPE_PATH"
-    cp "$rendered_harness_path" "$RENDERED_HARNESS_SELF_OPTIMIZE_PATH"
     cp "$rendered_code_path" "$RENDERED_SUB_RECIPE_DIR/code-optimize.yaml"
     cp "$rendered_eval_path" "$RENDERED_SUB_RECIPE_DIR/evaluate-metric.yaml"
 
@@ -941,14 +920,12 @@ install_templates() {
     applied_hashes_json="$(hash_dict_json \
         config "$RENDERED_CONFIG_PATH" \
         autoresearch_loop "$RENDERED_RECIPE_PATH" \
-        harness_self_optimize "$RENDERED_HARNESS_SELF_OPTIMIZE_PATH" \
         code_optimize "$RENDERED_SUB_RECIPE_DIR/code-optimize.yaml" \
         evaluate_metric "$RENDERED_SUB_RECIPE_DIR/evaluate-metric.yaml")"
     ANGELLA_INSTALL_APPLIED_HASHES_JSON="$applied_hashes_json"
     rm -rf "$render_dir"
 
     ok "Rendered recipe installed to $RENDERED_RECIPE_PATH"
-    ok "Rendered recipe installed to $RENDERED_HARNESS_SELF_OPTIMIZE_PATH"
     ok "Rendered sub-recipes installed to $RENDERED_SUB_RECIPE_DIR"
 }
 

@@ -121,13 +121,19 @@ def compact_output(
     budget_chars: int = 600,
 ) -> dict[str, Any]:
     raw = text or ""
-    cleaned = _preprocess_lines(kind, raw)
-    compacted = "\n".join(cleaned).strip()
-    if not compacted:
-        compacted = _normalize_whitespace(raw)
-    compacted = _truncate_text(compacted, budget_chars).strip()
-    if kind == "summary":
-        compacted = compacted.replace("\n...\n", " ... ").replace("\n", " ").strip()
+    
+    if kind == "mask":
+        lines = raw.splitlines()
+        header = lines[0][:80].strip() if lines else "Empty Output"
+        compacted = f"[OBSERVATION MASKED] Header: '{header}' ... ({len(lines)} total lines omitted to prevent context rot.)"
+    else:
+        cleaned = _preprocess_lines(kind, raw)
+        compacted = "\n".join(cleaned).strip()
+        if not compacted:
+            compacted = _normalize_whitespace(raw)
+        compacted = _truncate_text(compacted, budget_chars).strip()
+        if kind == "summary":
+            compacted = compacted.replace("\n...\n", " ... ").replace("\n", " ").strip()
 
     raw_chars = len(raw)
     compact_chars = len(compacted)
@@ -184,7 +190,7 @@ if __name__ == "__main__":
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "kind": {"type": "string", "description": "Type of output: 'summary', 'test_output', 'benchmark_output', 'git_status', 'rg', or 'ls_find'."},
+                            "kind": {"type": "string", "description": "Type of output: 'summary', 'test_output', 'benchmark_output', 'git_status', 'rg', 'ls_find', or 'mask'."},
                             "text": {"type": "string", "description": "The raw text dump to compact."},
                             "budget_chars": {"type": "integer", "description": "Max character budget for the compacted text. Defaults to 600."}
                         },

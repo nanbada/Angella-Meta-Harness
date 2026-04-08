@@ -10,11 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 def run_npx_llmwiki(args: list) -> str:
     """Invokes the llm-wiki-compiler via npx from the knowledge directory."""
-    cmd = ["npx", "llm-wiki-compiler"] + args
-    knowledge_dir = PROJECT_ROOT / "knowledge"
-    knowledge_dir.mkdir(parents=True, exist_ok=True)
     
-    # Load .env.agents if it exists to supply API keys
+    # Load .env.agents if it exists to supply API keys and potential path overrides
     env = os.environ.copy()
     env_agents = PROJECT_ROOT / ".env.agents"
     if env_agents.exists():
@@ -23,6 +20,15 @@ def run_npx_llmwiki(args: list) -> str:
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
                 env[k.strip()] = v.strip()
+
+    # Use ANGELLA_KNOWLEDGE_DIR if set, otherwise default to linked 'knowledge' dir
+    knowledge_path_str = env.get("ANGELLA_KNOWLEDGE_DIR")
+    if knowledge_path_str:
+        knowledge_dir = Path(knowledge_path_str).expanduser().resolve()
+    else:
+        knowledge_dir = PROJECT_ROOT / "knowledge"
+        
+    knowledge_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         # Prompting npm/npx might ask "Need to install the following packages... Ok to proceed? (y)"
@@ -70,6 +76,31 @@ def handle_request(request: dict) -> dict:
         output = run_npx_llmwiki(cmd_args)
         return {"content": [{"type": "text", "text": output}]}
         
+    elif tool == "llmwiki_save_note":
+        title = args.get("title")
+        content = args.get("content")
+        if not title or not content:
+            return {"error": "Missing 'title' or 'content' argument."}
+        
+        # Determine knowledge path
+        env = os.environ.copy()
+        env_agents = PROJECT_ROOT / ".env.agents"
+        if env_agents.exists():
+            for line in env_agents.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    env[k.strip()] = v.strip()
+        
+        knowledge_dir = Path(env.get("ANGELLA_KNOWLEDGE_DIR", PROJECT_ROOT / "knowledge"))
+        sources_dir = knowledge_dir / "sources"
+        sources_dir.mkdir(parents=True, exist_ok=True)
+        
+        file_path = sources_dir / f"{title.replace(' ', '_')}.md"
+        file_path.write_text(f"# {title}\n\n{content}", encoding="utf-8")
+        
+        return {"content": [{"type": "text", "text": f"Successfully saved note to {file_path}. Run llmwiki_compile to index it."}]}
+        
     else:
         return {"error": f"Unknown tool: {tool}"}
 
@@ -106,6 +137,18 @@ if __name__ == "__main__":
                             "save": {"type": "boolean", "description": "If true, the answer will be permanently saved as a new wiki page for future compounding knowledge."}
                         },
                         "required": ["question"]
+                    }
+                },
+                {
+                    "name": "llmwiki_save_note",
+                    "description": "Saves raw text content (e.g. from clipboard or agent thoughts) directly as a new source file in the knowledge base.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string", "description": "A descriptive title for the note."},
+                            "content": {"type": "string", "description": "The markdown content of the note."}
+                        },
+                        "required": ["title", "content"]
                     }
                 }
             ]

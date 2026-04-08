@@ -1,327 +1,43 @@
-# Angella
+# Angella (v2)
 
-MacBook Pro M3 36GB에서 [Goose](https://github.com/block/goose)를 활용해 실행하는 frontier-first personal agent harness입니다.
+MacBook Pro M3 36GB 기반 **Frontier-First Personal Agent Harness**입니다.
 
-Angella는 기본적으로 frontier lead/planner/worker + control plane 구조를 사용합니다. local LLM은 더 이상 기본 worker가 아니라 fallback, augment, cache 계층으로만 사용합니다. 모델은 고정값이 아니라 catalog/selector로 결정되며, 기본 실행 흐름은 [`recipes/autoresearch-loop.yaml`](recipes/autoresearch-loop.yaml) 하나로 고정합니다.
-
-## 핵심 동작
-
-Angella는 clean Git 저장소에서만 시작합니다.
-
-1. 대상 프로젝트가 Git 저장소인지 확인합니다.
-2. tracked 변경과 untracked 파일을 포함해 worktree가 깨끗한지 확인합니다.
-3. 현재 브랜치가 아니라 `angella/run-<timestamp>` 전용 실행 브랜치를 만듭니다.
-4. Intent Contract를 고정하고 baseline을 측정합니다.
-5. edit → benchmark → keep/revert를 반복합니다.
-6. 모든 iteration을 `run_id` 기준 로그와 final report로 남깁니다.
-
-핵심은 모델 이름 하나가 아니라, 의도 계약, selector 기반 모델 해상도, 객관적 메트릭, 안전한 revert, 그리고 run-scoped transparency입니다.
-
-## 빠른 시작
-
-### 1. 사전 점검
+## 🚀 Quick Start
 
 ```bash
+# 1. 환경 점검 및 설치
 bash setup.sh --check
-```
-
-이 모드는 설치 없이 아래만 검증합니다.
-
-- 필수 런타임 존재 여부
-- Python/pip 사용 가능 여부
-- Angella 템플릿 렌더링 가능 여부
-- placeholder 또는 개발자 전용 절대 경로 누락 여부
-
-### 2. 설치
-
-```bash
-bash setup.sh
-```
-
-무인 설치가 필요하면 아래를 사용합니다.
-
-```bash
 bash setup.sh --yes
-```
 
-`setup.sh`는 다음을 수행합니다.
-
-- Stage 1: bootstrap
-  - Goose CLI 확인 또는 Homebrew 설치
-  - harness catalog/profile resolution
-  - selected worker runtime 확인
-  - local fallback runtime이 선택된 경우에만 Ollama/apfel 확인
-  - reusable bootstrap Python env 준비
-- Stage 2: install
-  - Goose config와 recipe/sub-recipe 렌더링
-  - custom provider/apfel template 렌더링
-  - control-plane 디렉토리 생성
-  - Angella 로그 디렉토리 생성
-  - follow-up 실행 정보 출력
-
-### 3. 환경 변수 적용
-
-```bash
+# 2. API Key 설정
 bash scripts/setup-vault.sh
-```
 
-다중 Frontier 모델(Google, Anthropic, OpenAI)의 API Key를 안전하게 로드하기 위해 위 터미널 명령을 수행하면 `.env.agents` 파일이 생성됩니다(Git 추적에서 자동 제외됩니다).
-
-기존 MLX 전용 설정이 필요하다면:
-```bash
-cp .env.mlx.example .env.mlx
-source .env.mlx
-```
-
-`.env.mlx.example`는 커밋되는 예시 파일이고, 실제 로컬 환경 파일은 `.env.mlx` 및 `.env.agents`로 두고 git에는 올리지 않습니다. 이 파일은 `ANGELLA_ROOT`와 `OBSIDIAN_VAULT_PATH`를 결정적으로 설정합니다. 별도 override가 없으면 로그는 Angella 설치 경로 하위 `logs/`에 저장됩니다.
-
-Repo-local cache paths:
-
-- bootstrap env: `.cache/angella/bootstrap-venv`
-- uv cache: `.cache/angella/uv`
-- pip cache: `.cache/angella/pip`
-- optional wheelhouse: `vendor/wheels`
-
-선택적으로 stage를 분리해서 실행할 수도 있습니다.
-
-```bash
-bash setup.sh --bootstrap-only
-bash setup.sh --install-only
-```
-
-wheelhouse를 미리 채우려면:
-
-```bash
-bash scripts/build-wheelhouse.sh
-```
-
-Harness catalog를 보려면:
-
-```bash
-bash setup.sh --list-models
-bash setup.sh --list-harness-profiles
-```
-
-특정 조합을 강제하려면:
-
-```bash
-bash setup.sh --yes \
-  --harness-profile frontier_default \
-  --lead-model openai_gpt_5_2_pro \
-  --planner-model anthropic_claude_sonnet_4 \
-  --worker-model openai_gpt_5_2
-```
-
-### 4. Lead/Planner Credential 확인
-
-Angella는 lead/planner/worker를 catalog/selector로 고릅니다. 기본 catalog에는 Google, Anthropic, OpenAI frontier 후보가 들어 있으며, `setup.sh`는 선택된 worker가 frontier면 해당 credential, local fallback이면 해당 local runtime 상태를 안내합니다.
-
-직접 설정하려면:
-
-```bash
-goose configure
-```
-
-또는 셸에서 미리 export 합니다.
-
-### 5. 루프 실행 (Autoresearch / Personal Agent)
-
-개발 코드 최적화 중심의 래칫 루프(Ratchet Loop):
-```bash
+# 3. 루프 실행
 goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s
 ```
 
-개인용 AI 비서 중심의 OS 제어 및 LLM-Wiki 루프:
-```bash
-goose run --recipe ~/.config/goose/recipes/personal-agent-loop.yaml -s
-```
+## 📖 Documentation Map
 
-Harness self-optimize recipe도 설치 후 바로 사용할 수 있습니다.
+AI 에이전트와 사용자는 목적에 따라 아래 문서를 참조하세요.
 
-```bash
-goose run --recipe ~/.config/goose/recipes/harness-self-optimize.yaml -s
-```
+### 1. 지침 및 규격 (Reference & Specs)
+- **[Harness Philosophy](knowledge/sops/harness-philosophy.md)**: Angella의 핵심 운영 철학 (Harness-First, Ratchet).
+- **[Technical Specs](docs/spec-contracts.md)**: Intent/Benchmark Contract 및 Git 운영 규칙 명세.
+- **[Harness Profiles](config/harness-profiles.yaml)**: 모델 선택 및 라우팅 정책 정의.
 
-입력 파라미터(Self-optimize 기준):
+### 2. 설치 및 환경 (Setup)
+- **[Gemma 4 & MLX Guide](docs/setup-gemma4-mlx.md)**: 로컬 모델(Gemma 4) 최적화 및 설치 상세.
+- **[Architecture Snapshot](docs/arch-snapshot.md)**: 현재 구현된 기술 스택 및 모듈 구조.
 
-- `target_project_path`: 최적화할 프로젝트의 절대 경로
-- `objective_metric`: `build_time`, `tokens_per_second`, `latency_ms`, `bundle_size`
-- `benchmark_command`: 실제 benchmark 명령
-- `max_iterations`: 최대 반복 횟수
-- `improvement_threshold`: keep 판정 임계값
+### 3. 프로젝트 관리 (Meta)
+- **[Project Plan](plan.md)**: v2 비전 및 단계별 로드맵.
+- **[Parity Status](docs/PARITY.md)**: 현재 구현된 기능 검증 리스트.
 
-예시:
+## 🛠️ Key Extensions (MCP)
+- `metric-benchmark`: 성능 측정
+- `llm-wiki-compiler`: 지식 구조화
+- `output-compactor`: 토큰 효율화 (로그 압축)
+- `scion-coordination`: Google Scion 기반 병렬 협업
 
-```bash
-goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s \
-  --params target_project_path=/absolute/path/to/project \
-  --params objective_metric=build_time \
-  --params benchmark_command='npm run build'
-```
-
-## Intent Contract
-
-루프는 baseline 전에 아래 계약을 고정합니다.
-
-- `ideal_state_8_12_words`
-- `metric_key`
-- `intent_summary`
-- `metric_reason`
-- `non_goals`
-- `success_threshold`
-- `binary_acceptance_checks`
-- `operator_constraints`
-- `first_hypotheses`
-
-이 값은 baseline 로그와 final report에 모두 기록됩니다.
-
-## Benchmark Contract
-
-기본 benchmark MCP와 프로젝트별 adapter는 모두 같은 핵심 payload를 반환해야 합니다.
-
-- `success`
-- `metric_key`
-- `metric_value`
-- `duration_seconds`
-- `exit_code`
-- `stdout_tail`
-- `stderr_tail`
-- `aux_metrics`
-
-판정 규칙:
-
-- `success=false`면 실패 iteration입니다.
-- benchmark non-zero exit, metric parse 실패, timeout은 모두 revert 대상입니다.
-- 실패 iteration은 baseline을 갱신하지 않습니다.
-
-## Git 운영 규칙
-
-- dirty worktree에서는 시작하지 않습니다.
-- 사용자의 현재 브랜치에서 직접 수정하지 않습니다.
-- 각 run은 `angella/run-<timestamp>` 브랜치에서 수행합니다.
-- 각 iteration은 candidate commit 생성 후 benchmark를 거쳐 keep 또는 `git revert HEAD --no-edit`로 정리합니다.
-- run 종료 후 자동으로 원래 브랜치로 돌아가지 않습니다.
-
-## 로그와 Transparency
-
-기본 로그 경로:
-
-`$ANGELLA_ROOT/logs/Goose Logs/`
-
-환경변수 `OBSIDIAN_VAULT_PATH`를 주면 그 경로를 우선합니다.
-
-생성 파일:
-
-- `<run_id>.md`: baseline, iteration별 keep/revert/failure 기록
-- `<run_id>-FINAL.md`: 최종 결과와 전체 diff 요약
-
-로그에는 다음이 포함됩니다.
-
-- `run_id`
-- `start_commit`
-- `candidate_commit`
-- `decision`
-- `improvement_percent`
-- `benchmark_command`
-- `working_directory`
-- `failure_reason`
-- Intent Contract
-
-Control-plane 및 Meta-loop 메커니즘은 Token/Performance 최적화 및 LLM-Wiki 체제로의 전면 전환에 따라 제거되었습니다. 관련 지식 관리는 현재 `llm-wiki-compiler` 파이프라인이 전담합니다.
-
-Canonical frontier-first profiles:
-
-- `frontier_default`
-- `frontier_quality`
-- `frontier_cost_guarded`
-- `frontier_private_fallback`
-- `local_lab`
-- `frontier_token_saver_lab`
-- `personal_agent_tier` (Multi-tier OS Personal Agent)
-
-Removed canonical profiles:
-
-- `default`
-- `frontier_low_cost`
-- `local_reasoning`
-- `low_latency_apfel`
-- `preview_nvfp4`
-
-Optional experimental slots:
-
-- `qmd` search provider via `search_harness_knowledge(provider="qmd")`
-
-## 프로젝트별 Adapter
-
-기본 flow는 generic benchmark MCP를 사용합니다. 아래 adapter는 같은 출력 계약과 `run_benchmark`/`compare_metrics` 인터페이스를 제공하는 선택형 대체재입니다.
-
-| 프로젝트 | 서버 파일 | 주요 metric |
-|----------|-----------|-------------|
-| Next.js | [`mcp-servers/metric_benchmark_nextjs.py`](mcp-servers/metric_benchmark_nextjs.py) | `build_time`, `bundle_size` |
-| Python/MLX | [`mcp-servers/metric_benchmark_python.py`](mcp-servers/metric_benchmark_python.py) | `tokens_per_second`, `latency_ms` |
-| Swift/SwiftUI | [`mcp-servers/metric_benchmark_swift.py`](mcp-servers/metric_benchmark_swift.py) | `build_time`, `latency_ms` |
-
-이 adapter들은 공식 기본 경로가 아니며, main recipe를 바꾸지 않고 교체 가능한 benchmark backend로만 취급합니다.
-
-## 프로젝트 구조
-
-```text
-Angella/
-├── setup.sh
-├── .env.mlx.example
-├── .goosehints
-├── .cache/                         # local bootstrap/cache/control-plane only
-├── config/
-│   ├── harness-models.yaml
-│   ├── harness-profiles.yaml
-│   ├── goose-config.yaml
-│   ├── init-config.yaml
-│   └── custom-providers/
-├── docs/
-│   ├── hybrid-harness.md
-│   ├── personal-agent-non-goals.md
-│   ├── setup-check-optimization-history.md
-│   └── setup-installer-architecture.md
-├── knowledge/
-│   ├── components/
-│   ├── queries/
-│   ├── sources/
-│   ├── sops/
-│   ├── skills/
-│   ├── index.md
-│   ├── log.md
-│   └── schema.md
-├── scripts/
-│   ├── harness_catalog.py
-│   ├── harness_parity_scenarios.json
-│   ├── build-wheelhouse.sh
-│   ├── run_harness_parity_diff.py
-│   ├── setup-common.sh
-│   ├── setup-bootstrap.sh
-│   ├── setup-install.sh
-│   ├── setup-vault.sh
-│   ├── validate_harness_schema.py
-│   └── test_setup_flows.sh
-├── recipes/
-│   ├── autoresearch-loop.yaml
-│   ├── personal-agent-loop.yaml
-│   ├── harness-self-optimize.yaml
-│   └── sub/
-│       ├── code-optimize.yaml
-│       └── evaluate-metric.yaml
-├── mcp-servers/
-│   ├── common.py
-│   ├── metric_benchmark.py
-│   ├── metric_benchmark_nextjs.py
-│   ├── metric_benchmark_python.py
-│   ├── metric_benchmark_swift.py
-│   ├── obsidian_auto_log.py
-│   ├── output_compactor.py
-│   ├── personal_context_ops.py
-│   ├── shell_router.py
-│   └── requirements.txt
-├── .github/workflows/
-│   └── repo-checks.yml
-├── PARITY.md
-└── logs/
-```
+---
+프로젝트 구조 및 상세 내용은 **[`docs/arch-snapshot.md`](docs/arch-snapshot.md)**를 참조하세요.

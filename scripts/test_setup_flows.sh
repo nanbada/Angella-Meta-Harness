@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TMP_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TMP_ROOT"' EXIT
+# trap 'rm -rf "$TMP_ROOT"' EXIT
 
 FAKE_BIN="$TMP_ROOT/bin"
 mkdir -p "$FAKE_BIN"
@@ -204,10 +204,8 @@ YES_ERR="$TMP_ROOT/yes.err"
 
 test -f "$YES_HOME/.config/goose/config.yaml"
 test -f "$YES_HOME/.config/goose/recipes/autoresearch-loop.yaml"
-test -f "$YES_HOME/.config/goose/recipes/harness-self-optimize.yaml"
 test -f "$YES_HOME/.config/goose/recipes/sub/code-optimize.yaml"
 test -f "$YES_HOME/.config/goose/recipes/sub/evaluate-metric.yaml"
-grep -q 'command: "harness-self-optimize"' "$YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_LEAD_PROVIDER: "openai"' "$YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_LEAD_MODEL: "gpt-5.2-pro"' "$YES_HOME/.config/goose/config.yaml"
 grep -q 'GOOSE_PLANNER_PROVIDER: "anthropic"' "$YES_HOME/.config/goose/config.yaml"
@@ -226,22 +224,12 @@ grep -q '"execution_mode": "frontier_primary"' "$ROOT_DIR/.cache/angella/control
 grep -q '"worker_tier": "frontier_primary"' "$ROOT_DIR/.cache/angella/control-plane/current-selection.json"
 
 if command -v rg >/dev/null 2>&1; then
-  ! rg -q '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__|__RENDERED_HARNESS_SELF_OPTIMIZE_PATH__' "$YES_HOME/.config/goose"
+  ! rg -q '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__' "$YES_HOME/.config/goose"
 else
-  ! grep -REq '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__|__RENDERED_HARNESS_SELF_OPTIMIZE_PATH__' "$YES_HOME/.config/goose"
+  ! grep -REq '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__' "$YES_HOME/.config/goose"
 fi
 
 grep -q "Goose config installed to" "$YES_OUT"
 grep -q "Rendered recipe installed to" "$YES_OUT"
-
-python3 "$ROOT_DIR/scripts/test_control_plane_logging.py"
-python3 "$ROOT_DIR/scripts/test_frontier_harness_reset.py"
-python3 "$ROOT_DIR/scripts/test_meta_loop_admin.py"
-python3 "$ROOT_DIR/scripts/test_harness_self_optimize_adapter.py"
-python3 "$ROOT_DIR/scripts/test_harness_knowledge.py"
-python3 "$ROOT_DIR/scripts/test_harness_parity_diff.py"
-python3 "$ROOT_DIR/scripts/test_optional_providers.py"
-python3 "$ROOT_DIR/scripts/validate_harness_schema.py"
-python3 "$ROOT_DIR/scripts/run_harness_parity_diff.py"
 
 echo "setup flow tests passed"

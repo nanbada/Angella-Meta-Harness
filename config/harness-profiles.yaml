@@ -11,6 +11,10 @@
       "worker_tier_default": "frontier_primary",
       "local_cache_enabled": true,
       "token_saver_enabled": false,
+      "capability_flags": {
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"]
+      },
       "non_goals": [
         "Prefer local worker when a frontier worker is available",
         "Treat local runtime as the primary path",
@@ -27,6 +31,11 @@
       "worker_tier_default": "frontier_primary",
       "local_cache_enabled": true,
       "token_saver_enabled": false,
+      "capability_flags": {
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"],
+        "worker_required_flags": ["reasoning"]
+      },
       "non_goals": [
         "Trade quality away to save cost by default"
       ]
@@ -40,9 +49,14 @@
       "execution_mode": "frontier_cost_guarded",
       "worker_tier_default": "frontier_primary",
       "local_cache_enabled": true,
-      "token_saver_enabled": false,
+      "token_saver_enabled": true,
+      "capability_flags": {
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"]
+      },
       "non_goals": [
-        "Use a local worker to reduce cost when frontier is still available"
+        "Use a local worker to reduce cost when frontier is still available",
+        "Print verbose raw logs or full files; always use output_compactor to compress context to save tokens"
       ]
     },
     {
@@ -55,7 +69,12 @@
       "execution_mode": "frontier_private_fallback",
       "worker_tier_default": "frontier_primary",
       "local_cache_enabled": true,
-      "token_saver_enabled": false,
+      "token_saver_enabled": true,
+      "capability_flags": {
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"],
+        "fallback_worker_required_flags": ["local"]
+      },
       "fallback_when_any": [
         "private_mode",
         "token_limited",
@@ -63,7 +82,8 @@
         "frontier_unreachable"
       ],
       "non_goals": [
-        "Stay on frontier worker when privacy or connectivity constraints explicitly require fallback"
+        "Stay on frontier worker when privacy or connectivity constraints explicitly require fallback",
+        "Read raw extensive logs; use token-saving strategies and output_compactor if token_limited fallback triggered"
       ]
     },
     {
@@ -75,7 +95,33 @@
       "execution_mode": "local_lab",
       "worker_tier_default": "local_augment",
       "local_cache_enabled": true,
-      "token_saver_enabled": false
+      "token_saver_enabled": true,
+      "capability_flags": {
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"],
+        "worker_required_flags": ["local"]
+      },
+      "non_goals": [
+        "Overload the local worker context window with full build outputs; strictly summarize with output_compactor"
+      ]
+    },
+    {
+      "id": "frontier_token_saver_lab",
+      "display_name": "Frontier Token Saver Lab",
+      "lead_selector": "best_reasoning_frontier_low_cost",
+      "planner_selector": "best_reasoning_frontier_low_cost",
+      "worker_selector": "best_reasoning_frontier_low_cost",
+      "execution_mode": "frontier_cost_guarded",
+      "worker_tier_default": "frontier_primary",
+      "local_cache_enabled": true,
+      "token_saver_enabled": true,
+      "capability_flags": {
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"]
+      },
+      "non_goals": [
+        "Read raw extensive logs; use token-saving strategies and output_compactor to minimize context window usage"
+      ]
     },
     {
       "id": "personal_agent_tier",
@@ -88,6 +134,11 @@
       "worker_tier_default": "hybrid",
       "local_cache_enabled": true,
       "token_saver_enabled": false,
+      "capability_flags": {
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"],
+        "worker_required_flags": ["reasoning"]
+      },
       "fallback_when_any": [
         "local_context_needed",
         "private_mode"

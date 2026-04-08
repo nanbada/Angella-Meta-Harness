@@ -1,6 +1,6 @@
 # Parity Status — Angella Harness
 
-Last updated: 2026-04-07
+Last updated: 2026-04-08
 
 ## Summary
 
@@ -38,3 +38,9 @@ Last updated: 2026-04-07
 
 - Status: implemented
 - Evidence: `mcp-servers/output_compactor.py` (Fully repaired MCP stdin loop).
+
+## Lane 6 — Google Scion Swarm Integration
+
+- Status: implemented (Pilot)
+- Evidence: `mcp-servers/scion_coordination_ops.py`
+- Evidence: `recipes/autoresearch-loop.yaml` (Coordination instructions added).
