@@ -42,6 +42,20 @@ def main() -> int:
             os.environ["SCION_AGENT_ID"] = "angella-alpha"
             os.environ["SCION_TTL_SECONDS"] = "120"
 
+            worktree = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_register_worktree",
+                    "arguments": {
+                        "worktree_path": str(Path(tmp_root) / "wt-alpha"),
+                        "branch": "codex/scion-alpha",
+                        "base_branch": "main",
+                        "clean": True,
+                    },
+                }
+            )
+            assert "Registered worktree" in _text(worktree)
+
             claim = module.handle_request(
                 {
                     "type": "call_tool",
@@ -49,10 +63,12 @@ def main() -> int:
                     "arguments": {
                         "files": ["src/frontend", "./docs/PARITY.md"],
                         "intent": "Refactor frontend and parity docs",
+                        "mode": "exclusive",
                     },
                 }
             )
             assert "Claimed 2 file(s)" in _text(claim)
+            assert "Claim mode: exclusive" in _text(claim)
 
             broadcast = module.handle_request(
                 {
@@ -69,6 +85,9 @@ def main() -> int:
             alpha_state = json.loads((shared_dir / "agents" / "angella-alpha.json").read_text(encoding="utf-8"))
             assert alpha_state["status"] == "active"
             assert alpha_state["claimed_files"] == ["docs/PARITY.md", "src/frontend"]
+            assert alpha_state["worktree"]["branch"] == "codex/scion-alpha"
+            assert (shared_dir / "claims" / "docs" / "PARITY.md.json").is_file()
+            assert (shared_dir / "claims" / "src" / "frontend.json").is_file()
 
             inspect = module.handle_request(
                 {
@@ -80,6 +99,8 @@ def main() -> int:
             inspect_text = _text(inspect)
             assert "Active agents:" in inspect_text
             assert "angella-alpha status=active" in inspect_text
+            assert "worktree=branch=codex/scion-alpha" in inspect_text
+            assert "Authoritative claims:" in inspect_text
             assert "Recent events:" in inspect_text
 
             os.environ["SCION_AGENT_ID"] = "angella-beta"
@@ -89,13 +110,13 @@ def main() -> int:
                     "name": "scion_query_peers",
                     "arguments": {
                         "query": "Can I modify the frontend?",
-                        "candidate_files": ["src/frontend", "README.md"],
+                        "candidate_files": ["src/frontend/App.tsx", "README.md"],
                     },
                 }
             )
             text = _text(query)
             assert "Conflicts detected with active peers" in text
-            assert "angella-alpha -> src/frontend" in text
+            assert "angella-alpha -> src/frontend/App.tsx (peer claim: src/frontend)" in text
 
             strict_conflict = module.handle_request(
                 {
@@ -110,6 +131,20 @@ def main() -> int:
             assert "error" in strict_conflict
             assert "Conflicting Scion claims detected" in strict_conflict["error"]
 
+            beta_worktree = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_register_worktree",
+                    "arguments": {
+                        "worktree_path": str(Path(tmp_root) / "wt-beta"),
+                        "branch": "codex/scion-beta",
+                        "base_branch": "main",
+                        "clean": True,
+                    },
+                }
+            )
+            assert "Registered worktree" in _text(beta_worktree)
+
             overlap_warning = module.handle_request(
                 {
                     "type": "call_tool",
@@ -121,6 +156,22 @@ def main() -> int:
                 }
             )
             assert "Warning: overlapping claims" in _text(overlap_warning)
+
+            takeover = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_claim_files",
+                    "arguments": {
+                        "files": ["docs/PARITY.md"],
+                        "mode": "takeover",
+                        "takeover_from": "angella-alpha",
+                        "intent": "Take over parity documentation",
+                    },
+                }
+            )
+            takeover_text = _text(takeover)
+            assert "Claim mode: takeover" in takeover_text
+            assert "Took over exact claims from: angella-alpha" in takeover_text
 
             heartbeat = module.handle_request(
                 {
@@ -136,7 +187,13 @@ def main() -> int:
 
             beta_state = json.loads((shared_dir / "agents" / "angella-beta.json").read_text(encoding="utf-8"))
             assert beta_state["status"] == "waiting"
-            assert beta_state["claimed_files"] == ["src/frontend"]
+            assert beta_state["claimed_files"] == ["docs/PARITY.md", "src/frontend"]
+            assert beta_state["worktree"]["branch"] == "codex/scion-beta"
+
+            alpha_state_after_takeover = json.loads((shared_dir / "agents" / "angella-alpha.json").read_text(encoding="utf-8"))
+            assert alpha_state_after_takeover["claimed_files"] == ["src/frontend"]
+            parity_claim = json.loads((shared_dir / "claims" / "docs" / "PARITY.md.json").read_text(encoding="utf-8"))
+            assert parity_claim["agent_id"] == "angella-beta"
 
             os.environ["SCION_AGENT_ID"] = "angella-alpha"
             release = module.handle_request(
@@ -153,7 +210,8 @@ def main() -> int:
             assert "docs/PARITY.md" not in _text(release)
 
             alpha_state_after_release = json.loads((shared_dir / "agents" / "angella-alpha.json").read_text(encoding="utf-8"))
-            assert alpha_state_after_release["claimed_files"] == ["docs/PARITY.md"]
+            assert alpha_state_after_release["claimed_files"] == []
+            assert not (shared_dir / "claims" / "src" / "frontend.json").exists()
 
             stale_peer = {
                 "agent_id": "angella-stale",
@@ -171,6 +229,27 @@ def main() -> int:
                 json.dumps(stale_peer, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
+            (shared_dir / "claims").mkdir(parents=True, exist_ok=True)
+            (shared_dir / "claims" / "scripts").mkdir(parents=True, exist_ok=True)
+            (shared_dir / "claims" / "scripts" / "setup.sh.json").write_text(
+                json.dumps(
+                    {
+                        "agent_id": "angella-stale",
+                        "claimed_path": "scripts/setup.sh",
+                        "claim_mode": "exclusive",
+                        "intent": "old work",
+                        "message": "stale claim",
+                        "metadata": {},
+                        "worktree": {},
+                        "claimed_at": "2000-01-01T00:00:00+00:00",
+                        "claimed_at_epoch": 0.0,
+                        "expires_at_epoch": 1.0,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
 
             old_event_path = shared_dir / "events" / "1-angella-stale-broadcast.json"
             old_event_path.parent.mkdir(parents=True, exist_ok=True)
@@ -186,8 +265,9 @@ def main() -> int:
                     "arguments": {"event_retention_seconds": 60},
                 }
             )
-            assert "Pruned 1 stale agent state file(s)" in _text(prune)
+            assert "Pruned 1 stale agent state file(s) 1 stale claim file(s)" in _text(prune)
             assert not (shared_dir / "agents" / "angella-stale.json").exists()
+            assert not (shared_dir / "claims" / "scripts" / "setup.sh.json").exists()
             assert not old_event_path.exists()
 
             os.environ["SCION_AGENT_ID"] = "angella-beta"

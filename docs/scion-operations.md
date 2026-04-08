@@ -9,11 +9,14 @@ Angella의 Phase 7 Scion 기능은 실서비스 hub가 아니라 **file-backed c
 .scion/shared/
 ├── agents/
 │   └── <agent-id>.json
+├── claims/
+│   └── <repo-area>.json
 └── events/
     └── <timestamp>-<agent-id>-<kind>.json
 ```
 
 - `agents/`: active agent state, status, intent, claimed files, TTL
+- `claims/`: authoritative exclusive claim records and explicit takeover handoff state
 - `events/`: broadcast, claim, release, heartbeat 같은 recent event log
 
 ## Environment Variables
@@ -33,7 +36,12 @@ Angella의 Phase 7 Scion 기능은 실서비스 hub가 아니라 **file-backed c
    - 수정 전 candidate file overlap 확인
 3. `scion_claim_files`
    - 실제 수정 범위를 shared state에 claim
-   - `strict=true`면 겹치는 claim이 있을 때 바로 실패
+   - `mode=advisory`는 기존 MVP처럼 warning 기반 coordination
+   - `strict=true` 또는 `mode=exclusive`는 authoritative claim file을 만들고 겹치면 실패
+   - `mode=takeover` + `takeover_from=<agent-id>`는 정확히 같은 claim path에 한해 ownership handoff를 수행
+4. `scion_register_worktree`
+   - 현재 agent가 작업 중인 worktree path / branch / clean 상태를 등록
+   - `scion_inspect_state`와 peer query에 worktree metadata를 노출
 4. `scion_heartbeat`
    - 긴 작업 중 TTL 연장 및 상태 갱신
 5. `scion_broadcast`
@@ -47,14 +55,22 @@ Angella의 Phase 7 Scion 기능은 실서비스 hub가 아니라 **file-backed c
 
 ```json
 {"type":"call_tool","name":"scion_prune_stale","arguments":{"event_retention_seconds":3600}}
+{"type":"call_tool","name":"scion_register_worktree","arguments":{"worktree_path":"/tmp/angella-scion-alpha","branch":"codex/scion-alpha","base_branch":"main","clean":true}}
 {"type":"call_tool","name":"scion_query_peers","arguments":{"query":"Can I edit recipes/autoresearch-loop.yaml?","candidate_files":["recipes/autoresearch-loop.yaml"]}}
-{"type":"call_tool","name":"scion_claim_files","arguments":{"files":["recipes/autoresearch-loop.yaml"],"intent":"Phase 7 coordination hardening","strict":true}}
+{"type":"call_tool","name":"scion_claim_files","arguments":{"files":["recipes/autoresearch-loop.yaml"],"intent":"Phase 7 coordination hardening","mode":"exclusive"}}
 {"type":"call_tool","name":"scion_heartbeat","arguments":{"status":"active","message":"updating recipe coordination guidance"}}
 {"type":"call_tool","name":"scion_release_claims","arguments":{"files":["recipes/autoresearch-loop.yaml"],"note":"done"}}
 ```
 
+## Takeover Handoff
+
+- broad directory claim을 쪼개지 않은 상태에서 nested file takeover는 허용하지 않습니다.
+- `mode=takeover`는 같은 claim path에 대한 명시적 ownership handoff만 지원합니다.
+- takeover가 성공하면 이전 owner의 exact claim은 agent state와 authoritative claim file 양쪽에서 제거됩니다.
+
 ## Current Limits
 
-- hard locking이 아니라 file-backed coordination입니다.
+- advisory mode는 여전히 hard locking이 아니라 file-backed coordination입니다.
+- exclusive mode는 authoritative claim file을 쓰지만, worktree 생성 자체를 자동 수행하지는 않습니다.
 - TTL 기반이므로 heartbeat 없이 장시간 멈추면 stale state로 간주될 수 있습니다.
-- worktree 생성/프로세스 orchestration 자체는 아직 외부가 담당합니다.
+- worktree 생성/프로세스 orchestration 자체는 아직 외부가 담당하지만, Scion은 이제 worktree metadata를 등록하고 inspect/query에서 ownership context를 노출합니다.

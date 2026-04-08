@@ -48,9 +48,14 @@ def _events_dir() -> Path:
     return _shared_dir() / "events"
 
 
+def _claims_dir() -> Path:
+    return _shared_dir() / "claims"
+
+
 def _ensure_layout() -> None:
     _agents_dir().mkdir(parents=True, exist_ok=True)
     _events_dir().mkdir(parents=True, exist_ok=True)
+    _claims_dir().mkdir(parents=True, exist_ok=True)
 
 
 def _agent_id() -> str:
@@ -92,6 +97,17 @@ def _agent_state_path(agent_id: str) -> Path:
     return _agents_dir() / f"{agent_id}.json"
 
 
+def _claim_record_path(claimed_path: str) -> Path:
+    return Path(f"{_claims_dir() / Path(claimed_path)}.json")
+
+
+def _claimed_path_from_record_path(path: Path) -> str:
+    relative = path.relative_to(_claims_dir()).as_posix()
+    if relative.endswith(".json"):
+        return relative[:-5]
+    return relative
+
+
 def _event_timestamp_prefix() -> int:
     return int(_utc_now().timestamp() * 1000)
 
@@ -107,6 +123,19 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_json_exclusive(path: Path, payload: dict[str, Any]) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
+        return False
+
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, ensure_ascii=False)
+        handle.write("\n")
+    return True
 
 
 def _fresh(state: dict[str, Any]) -> bool:
@@ -127,6 +156,7 @@ def _load_agent_state(agent_id: str) -> dict[str, Any]:
         "message": "",
         "claimed_files": [],
         "metadata": {},
+        "worktree": {},
         "updated_at": _iso_now(),
         "updated_at_epoch": now,
         "expires_at_epoch": now + ttl,
@@ -141,6 +171,7 @@ def _save_agent_state(
     message: str | None = None,
     claimed_files: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
+    worktree: dict[str, Any] | None = None,
     ttl_seconds: int | None = None,
 ) -> dict[str, Any]:
     state = _load_agent_state(agent_id)
@@ -157,6 +188,8 @@ def _save_agent_state(
         state["claimed_files"] = _normalize_paths(claimed_files)
     if metadata is not None:
         state["metadata"] = metadata
+    if worktree is not None:
+        state["worktree"] = worktree
 
     state["updated_at"] = _iso_now()
     state["updated_at_epoch"] = now
@@ -207,10 +240,258 @@ def _all_fresh_agents() -> list[dict[str, Any]]:
     return agents
 
 
-def _overlap(candidate_files: list[str], peer_files: list[str]) -> list[str]:
-    candidate = set(_normalize_paths(candidate_files))
-    peer = set(_normalize_paths(peer_files))
-    return sorted(candidate & peer)
+def _paths_overlap(candidate: str, claimed: str) -> bool:
+    if candidate == claimed:
+        return True
+    return candidate.startswith(f"{claimed}/") or claimed.startswith(f"{candidate}/")
+
+
+def _overlap_pairs(candidate_files: list[str], peer_files: list[str]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for candidate in _normalize_paths(candidate_files):
+        for claimed in _normalize_paths(peer_files):
+            if not _paths_overlap(candidate, claimed):
+                continue
+            pair = (candidate, claimed)
+            if pair in seen:
+                continue
+            seen.add(pair)
+            pairs.append(pair)
+    return pairs
+
+
+def _format_conflict_pairs(pairs: list[tuple[str, str]]) -> str:
+    rendered: list[str] = []
+    for candidate, claimed in pairs:
+        if candidate == claimed:
+            rendered.append(candidate)
+        else:
+            rendered.append(f"{candidate} (peer claim: {claimed})")
+    return ", ".join(rendered)
+
+
+def _format_worktree(worktree: dict[str, Any] | None) -> str:
+    if not worktree:
+        return ""
+
+    path = str(worktree.get("path", "")).strip()
+    branch = str(worktree.get("branch", "")).strip()
+    base_branch = str(worktree.get("base_branch", "")).strip()
+    clean = worktree.get("clean")
+    head_sha = str(worktree.get("head_sha", "")).strip()
+
+    parts: list[str] = []
+    if branch:
+        parts.append(f"branch={branch}")
+    if base_branch:
+        parts.append(f"base={base_branch}")
+    if clean is not None:
+        parts.append(f"clean={str(bool(clean)).lower()}")
+    if head_sha:
+        parts.append(f"head={head_sha}")
+    if path:
+        parts.append(f"path={path}")
+    return " ".join(parts)
+
+
+def _load_claim_records() -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    if not _claims_dir().exists():
+        return records
+
+    for path in sorted(_claims_dir().rglob("*.json")):
+        try:
+            record = _read_json(path)
+        except Exception:
+            continue
+        record["_path"] = path
+        record["claimed_path"] = _normalize_path(str(record.get("claimed_path", "") or _claimed_path_from_record_path(path)))
+        records.append(record)
+    return records
+
+
+def _fresh_claim_record(record: dict[str, Any]) -> bool:
+    expires = float(record.get("expires_at_epoch", 0.0) or 0.0)
+    return expires > time.time()
+
+
+def _claim_conflicts_for_files(self_id: str, candidate_files: list[str]) -> list[dict[str, Any]]:
+    conflicts: list[dict[str, Any]] = []
+    for record in _load_claim_records():
+        if not _fresh_claim_record(record):
+            continue
+        owner = str(record.get("agent_id", "")).strip()
+        if not owner or owner == self_id:
+            continue
+        pairs = _overlap_pairs(candidate_files, [record.get("claimed_path", "")])
+        if not pairs:
+            continue
+        conflicts.append(
+            {
+                "agent_id": owner,
+                "claimed_path": record["claimed_path"],
+                "claim_mode": record.get("claim_mode", "exclusive"),
+                "pairs": pairs,
+                "intent": record.get("intent", ""),
+                "message": record.get("message", ""),
+                "worktree": record.get("worktree", {}),
+                "_path": record["_path"],
+                "_record": record,
+            }
+        )
+    return conflicts
+
+
+def _self_claim_records(agent_id: str) -> list[dict[str, Any]]:
+    return [record for record in _load_claim_records() if record.get("agent_id") == agent_id]
+
+
+def _agent_claim_ttl_seconds(state: dict[str, Any]) -> int:
+    remaining = int(float(state.get("expires_at_epoch", 0.0) or 0.0) - time.time())
+    return max(30, remaining)
+
+
+def _drop_claimed_files_from_agent(agent_id: str, claimed_paths: list[str]) -> None:
+    if not claimed_paths:
+        return
+    state_path = _agent_state_path(agent_id)
+    if not state_path.exists():
+        return
+    state = _load_agent_state(agent_id)
+    removal = set(_normalize_paths(claimed_paths))
+    current = _normalize_paths(state.get("claimed_files", []))
+    remaining = [item for item in current if item not in removal]
+    status = "idle" if not remaining else state.get("status", "active")
+    _save_agent_state(
+        agent_id,
+        status=status,
+        intent=state.get("intent", ""),
+        message=state.get("message", ""),
+        claimed_files=remaining,
+        metadata=state.get("metadata", {}),
+        worktree=state.get("worktree", {}),
+        ttl_seconds=_agent_claim_ttl_seconds(state),
+    )
+
+
+def _claim_payload(
+    agent_id: str,
+    claimed_path: str,
+    *,
+    claim_mode: str,
+    intent: str,
+    message: str,
+    metadata: dict[str, Any],
+    worktree: dict[str, Any],
+    ttl_seconds: int,
+) -> dict[str, Any]:
+    now = time.time()
+    return {
+        "agent_id": agent_id,
+        "claimed_path": claimed_path,
+        "claim_mode": claim_mode,
+        "intent": intent,
+        "message": message,
+        "metadata": metadata,
+        "worktree": worktree,
+        "claimed_at": _iso_now(),
+        "claimed_at_epoch": now,
+        "expires_at_epoch": now + max(30, ttl_seconds),
+    }
+
+
+def _claim_conflict_text(conflicts: list[dict[str, Any]]) -> str:
+    rendered: list[str] = []
+    for conflict in conflicts:
+        rendered.append(f"{conflict['agent_id']} -> {_format_conflict_pairs(conflict['pairs'])}")
+    return "; ".join(rendered)
+
+
+def _authoritative_claim_files(
+    agent_id: str,
+    files: list[str],
+    *,
+    claim_mode: str,
+    takeover_from: str,
+    intent: str,
+    message: str,
+    metadata: dict[str, Any],
+    worktree: dict[str, Any],
+    ttl_seconds: int,
+) -> list[dict[str, Any]]:
+    created_paths: list[Path] = []
+    replaced_records: list[tuple[Path, dict[str, Any]]] = []
+    took_over_from: list[dict[str, Any]] = []
+    conflicts = _claim_conflicts_for_files(agent_id, files)
+
+    if claim_mode == "exclusive" and conflicts:
+        raise RuntimeError(f"Conflicting Scion claims detected: {_claim_conflict_text(conflicts)}")
+
+    if claim_mode == "takeover":
+        if not takeover_from:
+            raise RuntimeError("takeover_from is required when claim mode is takeover.")
+        for conflict in conflicts:
+            if conflict["agent_id"] != takeover_from:
+                raise RuntimeError(f"Cannot take over claim owned by {conflict['agent_id']}; expected {takeover_from}.")
+            if any(candidate != conflict["claimed_path"] for candidate, _claimed in conflict["pairs"]):
+                raise RuntimeError(
+                    "Takeover only supports exact claim handoff. Split broad claims before taking over nested files."
+                )
+
+    try:
+        for claimed_path in files:
+            claim_path = _claim_record_path(claimed_path)
+            current_record = _read_json(claim_path) if claim_path.exists() else {}
+            current_owner = str(current_record.get("agent_id", "")).strip()
+
+            payload = _claim_payload(
+                agent_id,
+                claimed_path,
+                claim_mode=claim_mode,
+                intent=intent,
+                message=message,
+                metadata=metadata,
+                worktree=worktree,
+                ttl_seconds=ttl_seconds,
+            )
+
+            if current_record and _fresh_claim_record(current_record) and current_owner not in {"", agent_id}:
+                if claim_mode != "takeover" or current_owner != takeover_from or current_record.get("claimed_path") != claimed_path:
+                    raise RuntimeError(f"Conflicting Scion claims detected: {_claim_conflict_text(conflicts)}")
+
+            if claim_path.exists():
+                if current_record:
+                    replaced_records.append((claim_path, current_record))
+                    if current_owner and current_owner != agent_id:
+                        took_over_from.append(current_record)
+                _write_json(claim_path, payload)
+                continue
+
+            if _write_json_exclusive(claim_path, payload):
+                created_paths.append(claim_path)
+                continue
+
+            latest = _read_json(claim_path)
+            latest_owner = str(latest.get("agent_id", "")).strip()
+            latest_path = _normalize_path(str(latest.get("claimed_path", claimed_path)))
+            if _fresh_claim_record(latest) and latest_owner not in {"", agent_id}:
+                raise RuntimeError(f"Conflicting Scion claims detected: {_claim_conflict_text(conflicts)}")
+            replaced_records.append((claim_path, latest))
+            if latest_owner and latest_owner != agent_id:
+                took_over_from.append(latest)
+            latest["claimed_path"] = latest_path
+            _write_json(claim_path, payload)
+
+        for previous in took_over_from:
+            _drop_claimed_files_from_agent(str(previous.get("agent_id", "")), [str(previous.get("claimed_path", ""))])
+        return took_over_from
+    except Exception:
+        for path in created_paths:
+            path.unlink(missing_ok=True)
+        for path, previous in reversed(replaced_records):
+            _write_json(path, previous)
+        raise
 
 
 def _summary_for_query(peers: list[dict[str, Any]], candidate_files: list[str]) -> str:
@@ -231,11 +512,14 @@ def _summary_for_query(peers: list[dict[str, Any]], candidate_files: list[str]) 
             peer_line += f" intent={intent}"
         if message:
             peer_line += f" message={message}"
+        worktree = _format_worktree(peer.get("worktree", {}))
+        if worktree:
+            peer_line += f" worktree={worktree}"
         peer_lines.append(peer_line)
 
-        overlap = _overlap(candidate_files, claimed)
+        overlap = _overlap_pairs(candidate_files, claimed)
         if overlap:
-            overlaps.append(f"{peer['agent_id']} -> {', '.join(overlap)}")
+            overlaps.append(f"{peer['agent_id']} -> {_format_conflict_pairs(overlap)}")
 
     if overlaps:
         return "Conflicts detected with active peers:\n" + "\n".join(overlaps) + "\n\nActive peers:\n" + "\n".join(peer_lines)
@@ -245,15 +529,17 @@ def _summary_for_query(peers: list[dict[str, Any]], candidate_files: list[str]) 
 def _conflicts_for_files(self_id: str, candidate_files: list[str]) -> list[dict[str, Any]]:
     conflicts: list[dict[str, Any]] = []
     for peer in _active_peers(self_id):
-        overlap = _overlap(candidate_files, peer.get("claimed_files", []))
+        overlap = _overlap_pairs(candidate_files, peer.get("claimed_files", []))
         if overlap:
             conflicts.append(
                 {
                     "agent_id": peer["agent_id"],
-                    "files": overlap,
+                    "files": [candidate for candidate, _claimed in overlap],
+                    "pairs": overlap,
                     "status": peer.get("status", "unknown"),
                     "intent": peer.get("intent", ""),
                     "message": peer.get("message", ""),
+                    "worktree": peer.get("worktree", {}),
                 }
             )
     return conflicts
@@ -289,6 +575,24 @@ def _inspect_state_text(*, include_events: bool = True, event_limit: int = 10) -
             message = agent.get("message", "")
             if message:
                 line += f" message={message}"
+            worktree = _format_worktree(agent.get("worktree", {}))
+            if worktree:
+                line += f" worktree={worktree}"
+            lines.append(line)
+
+    claim_records = [record for record in _load_claim_records() if _fresh_claim_record(record)]
+    if not claim_records:
+        lines.append("Authoritative claims: none")
+    else:
+        lines.append("Authoritative claims:")
+        for record in claim_records:
+            line = (
+                f"- {record.get('claimed_path', 'unknown')} owner={record.get('agent_id', 'unknown')} "
+                f"mode={record.get('claim_mode', 'exclusive')}"
+            )
+            worktree = _format_worktree(record.get("worktree", {}))
+            if worktree:
+                line += f" worktree={worktree}"
             lines.append(line)
 
     if include_events:
@@ -308,6 +612,7 @@ def _prune_stale(*, event_retention_seconds: int = 86400) -> dict[str, Any]:
     now = time.time()
     stale_agents: list[str] = []
     pruned_events: list[str] = []
+    stale_claims: list[str] = []
 
     for path in sorted(_agents_dir().glob("*.json")):
         try:
@@ -330,9 +635,41 @@ def _prune_stale(*, event_retention_seconds: int = 86400) -> dict[str, Any]:
             path.unlink(missing_ok=True)
             pruned_events.append(path.name)
 
+    for path in sorted(_claims_dir().rglob("*.json")):
+        remove = False
+        try:
+            record = _read_json(path)
+        except Exception:
+            remove = True
+            record = {}
+        claimed_path = _normalize_path(str(record.get("claimed_path", "") or _claimed_path_from_record_path(path)))
+        owner = str(record.get("agent_id", "")).strip()
+        if not remove and not _fresh_claim_record(record):
+            remove = True
+        if not remove and (not owner or not claimed_path):
+            remove = True
+        if not remove:
+            owner_path = _agent_state_path(owner)
+            if not owner_path.exists():
+                remove = True
+            else:
+                try:
+                    owner_state = _read_json(owner_path)
+                except Exception:
+                    remove = True
+                else:
+                    if not _fresh(owner_state):
+                        remove = True
+                    elif claimed_path not in _normalize_paths(owner_state.get("claimed_files", [])):
+                        remove = True
+        if remove:
+            path.unlink(missing_ok=True)
+            stale_claims.append(str(path.relative_to(_claims_dir())))
+
     return {
         "stale_agents_removed": stale_agents,
         "events_removed": pruned_events,
+        "claims_removed": stale_claims,
     }
 
 
@@ -363,6 +700,7 @@ def handle_request(request: dict) -> dict:
             intent=args.get("intent", previous.get("intent", "")),
             claimed_files=files if files else previous.get("claimed_files", []),
             metadata=metadata,
+            worktree=previous.get("worktree", {}),
             ttl_seconds=ttl_seconds,
         )
         event_path = _record_event(agent_id, "broadcast", {"message": message, "files": state.get("claimed_files", [])})
@@ -373,34 +711,97 @@ def handle_request(request: dict) -> dict:
         print(f"[SCION BROADCAST from {agent_id}] {message}", file=sys.stderr)
         return {"content": [{"type": "text", "text": text}]}
 
+    if tool == "scion_register_worktree":
+        worktree_path_raw = str(args.get("worktree_path", args.get("path", ""))).strip()
+        if not worktree_path_raw:
+            return {"error": "Missing 'worktree_path' argument."}
+        state = _load_agent_state(agent_id)
+        worktree = {
+            "path": str(Path(worktree_path_raw).expanduser().resolve()),
+            "branch": str(args.get("branch", "")).strip(),
+            "base_branch": str(args.get("base_branch", "")).strip(),
+            "head_sha": str(args.get("head_sha", "")).strip(),
+            "clean": args.get("clean"),
+            "registered_at": _iso_now(),
+        }
+        _save_agent_state(
+            agent_id,
+            status=args.get("status", state.get("status", "planning")),
+            intent=args.get("intent", state.get("intent", "")),
+            message=args.get("message", state.get("message", "")),
+            claimed_files=state.get("claimed_files", []),
+            metadata=state.get("metadata", {}),
+            worktree=worktree,
+            ttl_seconds=args.get("ttl_seconds"),
+        )
+        _record_event(agent_id, "worktree", worktree)
+        return {"content": [{"type": "text", "text": f"Registered worktree for {agent_id}: {_format_worktree(worktree)}"}]}
+
     if tool == "scion_claim_files":
         files = _normalize_paths(args.get("files"))
         if not files:
             return {"error": "Missing 'files' argument."}
         conflicts = _conflicts_for_files(agent_id, files)
-        strict = bool(args.get("strict", False))
-        if strict and conflicts:
-            conflict_text = "; ".join(f"{item['agent_id']} -> {', '.join(item['files'])}" for item in conflicts)
-            return {"error": f"Conflicting Scion claims detected: {conflict_text}"}
+        claim_mode = str(args.get("mode", "")).strip().lower() or "advisory"
+        if bool(args.get("strict", False)):
+            claim_mode = "exclusive"
+        if claim_mode not in {"advisory", "exclusive", "takeover"}:
+            return {"error": "Invalid claim mode. Use advisory, exclusive, or takeover."}
+        takeover_from = str(args.get("takeover_from", "")).strip()
+        if claim_mode == "exclusive":
+            authoritative_conflicts = _claim_conflicts_for_files(agent_id, files)
+            if authoritative_conflicts:
+                return {"error": f"Conflicting Scion claims detected: {_claim_conflict_text(authoritative_conflicts)}"}
+
         state = _load_agent_state(agent_id)
         current = set(_normalize_paths(state.get("claimed_files", [])))
         current.update(files)
         intent = args.get("intent", state.get("intent", ""))
         ttl_seconds = args.get("ttl_seconds")
-        saved = _save_agent_state(
+        message = args.get("message", state.get("message", ""))
+        metadata = args.get("metadata", state.get("metadata", {}))
+        worktree = state.get("worktree", {})
+        authoritative_handoffs: list[dict[str, Any]] = []
+        ttl = max(30, ttl_seconds or _default_ttl_seconds())
+        try:
+            if claim_mode in {"exclusive", "takeover"}:
+                authoritative_handoffs = _authoritative_claim_files(
+                    agent_id,
+                    files,
+                    claim_mode=claim_mode,
+                    takeover_from=takeover_from,
+                    intent=intent,
+                    message=message,
+                    metadata=metadata,
+                    worktree=worktree,
+                    ttl_seconds=ttl,
+                )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+        _save_agent_state(
             agent_id,
             status="claiming",
             intent=intent,
-            message=args.get("message", state.get("message", "")),
+            message=message,
             claimed_files=sorted(current),
-            metadata=args.get("metadata", state.get("metadata", {})),
+            metadata=metadata,
+            worktree=worktree,
             ttl_seconds=ttl_seconds,
         )
-        _record_event(agent_id, "claim", {"files": files, "intent": intent})
+        event_payload: dict[str, Any] = {"files": files, "intent": intent, "mode": claim_mode}
+        if takeover_from:
+            event_payload["takeover_from"] = takeover_from
+        _record_event(agent_id, "claim", event_payload)
         text = f"Claimed {len(files)} file(s) for {agent_id}: {', '.join(files)}"
+        if claim_mode != "advisory":
+            text += f"\nClaim mode: {claim_mode}"
         if conflicts:
-            conflict_text = "; ".join(f"{item['agent_id']} -> {', '.join(item['files'])}" for item in conflicts)
+            conflict_text = "; ".join(f"{item['agent_id']} -> {_format_conflict_pairs(item['pairs'])}" for item in conflicts)
             text += f"\nWarning: overlapping claims with {conflict_text}"
+        if authoritative_handoffs:
+            handoff_text = ", ".join(sorted({str(record.get("agent_id", "")) for record in authoritative_handoffs}))
+            text += f"\nTook over exact claims from: {handoff_text}"
         return {"content": [{"type": "text", "text": text}]}
 
     if tool == "scion_release_claims":
@@ -423,8 +824,19 @@ def handle_request(request: dict) -> dict:
             message=args.get("note", state.get("message", "")),
             claimed_files=remaining,
             metadata=state.get("metadata", {}),
+            worktree=state.get("worktree", {}),
             ttl_seconds=args.get("ttl_seconds"),
         )
+        release_targets = set(released)
+        for record in _self_claim_records(agent_id):
+            claimed_path = _normalize_path(str(record.get("claimed_path", "")))
+            if not claimed_path:
+                continue
+            if files and claimed_path not in release_targets:
+                continue
+            claim_path = record.get("_path")
+            if isinstance(claim_path, Path):
+                claim_path.unlink(missing_ok=True)
         _record_event(agent_id, "release", {"released_files": released, "remaining_files": remaining})
         text = f"Released {len(released)} claim(s) for {agent_id}."
         if files and len(released) != len(files):
@@ -443,8 +855,27 @@ def handle_request(request: dict) -> dict:
             message=args.get("message", state.get("message", "")),
             claimed_files=state.get("claimed_files", []),
             metadata=state.get("metadata", {}),
+            worktree=state.get("worktree", {}),
             ttl_seconds=ttl_seconds,
         )
+        for record in _self_claim_records(agent_id):
+            claimed_path = _normalize_path(str(record.get("claimed_path", "")))
+            if not claimed_path:
+                continue
+            claim_path = record.get("_path")
+            if not isinstance(claim_path, Path):
+                continue
+            refreshed = _claim_payload(
+                agent_id,
+                claimed_path,
+                claim_mode=str(record.get("claim_mode", "exclusive") or "exclusive"),
+                intent=saved.get("intent", ""),
+                message=saved.get("message", ""),
+                metadata=state.get("metadata", {}),
+                worktree=state.get("worktree", {}),
+                ttl_seconds=max(30, ttl_seconds or _default_ttl_seconds()),
+            )
+            _write_json(claim_path, refreshed)
         _record_event(agent_id, "heartbeat", {"status": saved.get("status", "unknown")})
         return {"content": [{"type": "text", "text": f"Heartbeat recorded for {agent_id}."}]}
 
@@ -457,6 +888,7 @@ def handle_request(request: dict) -> dict:
         result = _prune_stale(event_retention_seconds=int(args.get("event_retention_seconds", 86400)))
         text = (
             f"Pruned {len(result['stale_agents_removed'])} stale agent state file(s) "
+            f"{len(result['claims_removed'])} stale claim file(s) "
             f"and {len(result['events_removed'])} expired event(s)."
         )
         return {"content": [{"type": "text", "text": text}]}
@@ -498,17 +930,40 @@ if __name__ == "__main__":
                         },
                         {
                             "name": "scion_claim_files",
-                            "description": "Claims one or more files or repo areas in shared Scion state to reduce edit conflicts.",
+                            "description": "Claims one or more files or repo areas in shared Scion state to reduce edit conflicts or acquire authoritative locks.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "files": {"type": "array", "items": {"type": "string"}, "description": "Repo-relative files or areas to claim."},
                                     "intent": {"type": "string", "description": "Optional short intent for the claim."},
                                     "message": {"type": "string", "description": "Optional note to attach to the agent state."},
+                                    "mode": {"type": "string", "description": "Claim mode: advisory, exclusive, or takeover."},
+                                    "strict": {"type": "boolean", "description": "Legacy alias for mode=exclusive."},
+                                    "takeover_from": {"type": "string", "description": "Required when mode=takeover. Exact claim owner to take over from."},
                                     "ttl_seconds": {"type": "integer", "description": "Optional TTL for this agent state."},
                                     "metadata": {"type": "object", "description": "Optional arbitrary metadata."},
                                 },
                                 "required": ["files"],
+                            },
+                        },
+                        {
+                            "name": "scion_register_worktree",
+                            "description": "Registers the current agent's assigned worktree and branch metadata in shared Scion state.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "worktree_path": {"type": "string", "description": "Absolute or repo-relative worktree path."},
+                                    "path": {"type": "string", "description": "Legacy alias for worktree_path."},
+                                    "branch": {"type": "string", "description": "Current branch for this worktree."},
+                                    "base_branch": {"type": "string", "description": "Base branch for the worktree."},
+                                    "head_sha": {"type": "string", "description": "Optional current HEAD sha."},
+                                    "clean": {"type": "boolean", "description": "Whether the worktree is currently clean."},
+                                    "status": {"type": "string", "description": "Optional updated agent status label."},
+                                    "intent": {"type": "string", "description": "Optional intent to attach to the registration."},
+                                    "message": {"type": "string", "description": "Optional message to attach to the registration."},
+                                    "ttl_seconds": {"type": "integer", "description": "Optional TTL for this agent state."},
+                                },
+                                "required": ["worktree_path"],
                             },
                         },
                         {
