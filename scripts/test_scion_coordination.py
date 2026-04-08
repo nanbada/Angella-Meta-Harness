@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -283,6 +284,98 @@ def main() -> int:
             )
             assert "No direct conflicts detected" in _text(no_conflict)
             assert "angella-stale" not in _text(no_conflict)
+
+            repo_root = Path(tmp_root) / "repo"
+            repo_root.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["git", "init", "-b", "main", str(repo_root)], check=True, capture_output=True, text=True)
+            (repo_root / "README.md").write_text("hello\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo_root), "add", "README.md"], check=True, capture_output=True, text=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repo_root),
+                    "-c",
+                    "user.name=Scion Test",
+                    "-c",
+                    "user.email=scion@example.com",
+                    "commit",
+                    "-m",
+                    "init",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            os.environ["SCION_AGENT_ID"] = "angella-gamma"
+            gamma_worktree_path = Path(tmp_root) / "wt-gamma"
+            prepared = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_prepare_worktree",
+                    "arguments": {
+                        "repo_root": str(repo_root),
+                        "worktree_path": str(gamma_worktree_path),
+                        "branch": "codex/scion-gamma",
+                        "base_branch": "main",
+                    },
+                }
+            )
+            prepared_text = _text(prepared)
+            assert "Prepared worktree for angella-gamma" in prepared_text
+            assert gamma_worktree_path.is_dir()
+            current_branch = subprocess.run(
+                ["git", "-C", str(gamma_worktree_path), "branch", "--show-current"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            assert current_branch == "codex/scion-gamma"
+            assert (shared_dir / "worktrees" / "codex" / "scion-gamma.json").is_file()
+
+            inspect_after_prepare = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_inspect_state",
+                    "arguments": {"event_limit": 10},
+                }
+            )
+            inspect_after_prepare_text = _text(inspect_after_prepare)
+            assert "Reserved worktrees:" in inspect_after_prepare_text
+            assert "branch=codex/scion-gamma" in inspect_after_prepare_text
+
+            os.environ["SCION_AGENT_ID"] = "angella-delta"
+            conflicting_worktree = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_prepare_worktree",
+                    "arguments": {
+                        "repo_root": str(repo_root),
+                        "worktree_path": str(Path(tmp_root) / "wt-delta"),
+                        "branch": "codex/scion-gamma",
+                        "base_branch": "main",
+                    },
+                }
+            )
+            assert "error" in conflicting_worktree
+            assert "Conflicting Scion worktree reservations detected" in conflicting_worktree["error"]
+
+            os.environ["SCION_AGENT_ID"] = "angella-gamma"
+            removed = module.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "scion_remove_worktree",
+                    "arguments": {
+                        "repo_root": str(repo_root),
+                        "branch": "codex/scion-gamma",
+                        "worktree_path": str(gamma_worktree_path),
+                    },
+                }
+            )
+            assert "Removed worktree for angella-gamma" in _text(removed)
+            assert not gamma_worktree_path.exists()
+            assert not (shared_dir / "worktrees" / "codex" / "scion-gamma.json").exists()
         finally:
             for key, value in original_env.items():
                 if value is None:

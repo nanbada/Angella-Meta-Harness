@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -52,10 +53,15 @@ def _claims_dir() -> Path:
     return _shared_dir() / "claims"
 
 
+def _worktrees_dir() -> Path:
+    return _shared_dir() / "worktrees"
+
+
 def _ensure_layout() -> None:
     _agents_dir().mkdir(parents=True, exist_ok=True)
     _events_dir().mkdir(parents=True, exist_ok=True)
     _claims_dir().mkdir(parents=True, exist_ok=True)
+    _worktrees_dir().mkdir(parents=True, exist_ok=True)
 
 
 def _agent_id() -> str:
@@ -99,6 +105,11 @@ def _agent_state_path(agent_id: str) -> Path:
 
 def _claim_record_path(claimed_path: str) -> Path:
     return Path(f"{_claims_dir() / Path(claimed_path)}.json")
+
+
+def _worktree_record_path(branch: str) -> Path:
+    branch_key = _normalize_path(branch)
+    return Path(f"{_worktrees_dir() / Path(branch_key)}.json")
 
 
 def _claimed_path_from_record_path(path: Path) -> str:
@@ -311,7 +322,28 @@ def _load_claim_records() -> list[dict[str, Any]]:
     return records
 
 
+def _load_worktree_records() -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    if not _worktrees_dir().exists():
+        return records
+
+    for path in sorted(_worktrees_dir().rglob("*.json")):
+        try:
+            record = _read_json(path)
+        except Exception:
+            continue
+        record["_path"] = path
+        record["branch"] = _normalize_path(str(record.get("branch", "") or path.relative_to(_worktrees_dir()).as_posix()[:-5]))
+        records.append(record)
+    return records
+
+
 def _fresh_claim_record(record: dict[str, Any]) -> bool:
+    expires = float(record.get("expires_at_epoch", 0.0) or 0.0)
+    return expires > time.time()
+
+
+def _fresh_worktree_record(record: dict[str, Any]) -> bool:
     expires = float(record.get("expires_at_epoch", 0.0) or 0.0)
     return expires > time.time()
 
@@ -345,6 +377,10 @@ def _claim_conflicts_for_files(self_id: str, candidate_files: list[str]) -> list
 
 def _self_claim_records(agent_id: str) -> list[dict[str, Any]]:
     return [record for record in _load_claim_records() if record.get("agent_id") == agent_id]
+
+
+def _self_worktree_records(agent_id: str) -> list[dict[str, Any]]:
+    return [record for record in _load_worktree_records() if record.get("agent_id") == agent_id]
 
 
 def _agent_claim_ttl_seconds(state: dict[str, Any]) -> int:
@@ -401,11 +437,230 @@ def _claim_payload(
     }
 
 
+def _worktree_payload(
+    agent_id: str,
+    *,
+    repo_root: Path,
+    branch: str,
+    base_branch: str,
+    worktree_path: Path,
+    head_sha: str,
+    clean: bool,
+    ttl_seconds: int,
+) -> dict[str, Any]:
+    now = time.time()
+    return {
+        "agent_id": agent_id,
+        "repo_root": str(repo_root),
+        "branch": branch,
+        "base_branch": base_branch,
+        "path": str(worktree_path),
+        "head_sha": head_sha,
+        "clean": clean,
+        "registered_at": _iso_now(),
+        "registered_at_epoch": now,
+        "expires_at_epoch": now + max(30, ttl_seconds),
+    }
+
+
 def _claim_conflict_text(conflicts: list[dict[str, Any]]) -> str:
     rendered: list[str] = []
     for conflict in conflicts:
         rendered.append(f"{conflict['agent_id']} -> {_format_conflict_pairs(conflict['pairs'])}")
     return "; ".join(rendered)
+
+
+def _worktree_conflict_text(records: list[dict[str, Any]]) -> str:
+    rendered: list[str] = []
+    for record in records:
+        rendered.append(
+            f"{record.get('agent_id', 'unknown')} -> branch={record.get('branch', '')} path={record.get('path', '')}"
+        )
+    return "; ".join(rendered)
+
+
+def _default_worktree_root(repo_root: Path) -> Path:
+    configured = os.environ.get("SCION_WORKTREE_ROOT", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return (Path(tempfile.gettempdir()) / "angella-scion-worktrees" / repo_root.name).resolve()
+
+
+def _default_worktree_path(repo_root: Path, agent_id: str) -> Path:
+    return (_default_worktree_root(repo_root) / agent_id).resolve()
+
+
+def _run_git(repo_root: Path, args: list[str], *, cwd: Path | None = None) -> str:
+    command = ["git", "-C", str(repo_root), *args]
+    result = subprocess.run(
+        command,
+        cwd=str(cwd or repo_root),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip() or result.stdout.strip() or "git command failed"
+        raise RuntimeError(stderr)
+    return result.stdout.strip()
+
+
+def _repo_root(path_value: str | None) -> Path:
+    candidate = Path(path_value).expanduser().resolve() if path_value else _angella_root()
+    top = _run_git(candidate, ["rev-parse", "--show-toplevel"])
+    return Path(top).resolve()
+
+
+def _git_status_clean(repo_root: Path) -> bool:
+    output = _run_git(repo_root, ["status", "--porcelain", "--untracked-files=all"])
+    return not output.strip()
+
+
+def _git_worktree_head(repo_root: Path, worktree_path: Path) -> str:
+    return _run_git(repo_root, ["-C", str(worktree_path), "rev-parse", "HEAD"])
+
+
+def _git_worktree_clean(repo_root: Path, worktree_path: Path) -> bool:
+    output = _run_git(repo_root, ["-C", str(worktree_path), "status", "--porcelain", "--untracked-files=all"])
+    return not output.strip()
+
+
+def _worktree_metadata_from_runtime(repo_root: Path, worktree_path: Path, branch: str, base_branch: str) -> dict[str, Any]:
+    return {
+        "path": str(worktree_path),
+        "branch": branch,
+        "base_branch": base_branch,
+        "head_sha": _git_worktree_head(repo_root, worktree_path),
+        "clean": _git_worktree_clean(repo_root, worktree_path),
+        "registered_at": _iso_now(),
+    }
+
+
+def _update_self_claim_worktree(agent_id: str, worktree: dict[str, Any]) -> None:
+    for record in _self_claim_records(agent_id):
+        claim_path = record.get("_path")
+        if not isinstance(claim_path, Path):
+            continue
+        refreshed = dict(record)
+        refreshed.pop("_path", None)
+        refreshed["worktree"] = worktree
+        _write_json(claim_path, refreshed)
+
+
+def _upsert_worktree_record(agent_id: str, repo_root: Path, worktree: dict[str, Any], ttl_seconds: int) -> None:
+    branch = _normalize_path(str(worktree.get("branch", "")).strip())
+    path_raw = str(worktree.get("path", "")).strip()
+    if not branch or not path_raw:
+        return
+
+    worktree_path = Path(path_raw).expanduser().resolve()
+    conflicts: list[dict[str, Any]] = []
+    for record in _load_worktree_records():
+        if not _fresh_worktree_record(record):
+            continue
+        if record.get("branch") == branch and record.get("agent_id") == agent_id:
+            continue
+        if Path(str(record.get("path", ""))).resolve() == worktree_path and record.get("agent_id") == agent_id:
+            continue
+        if record.get("branch") == branch or Path(str(record.get("path", ""))).resolve() == worktree_path:
+            conflicts.append(record)
+    if conflicts:
+        raise RuntimeError(f"Conflicting Scion worktree reservations detected: {_worktree_conflict_text(conflicts)}")
+
+    payload = _worktree_payload(
+        agent_id,
+        repo_root=repo_root,
+        branch=branch,
+        base_branch=str(worktree.get("base_branch", "")).strip(),
+        worktree_path=worktree_path,
+        head_sha=str(worktree.get("head_sha", "")).strip(),
+        clean=bool(worktree.get("clean", False)),
+        ttl_seconds=ttl_seconds,
+    )
+    _write_json(_worktree_record_path(branch), payload)
+
+
+def _prepare_worktree(
+    agent_id: str,
+    *,
+    repo_root: Path,
+    branch: str,
+    base_branch: str,
+    worktree_path: Path,
+    allow_dirty_root: bool,
+    ttl_seconds: int,
+) -> dict[str, Any]:
+    if not allow_dirty_root and not _git_status_clean(repo_root):
+        raise RuntimeError("Refusing to prepare worktree from a dirty repository root.")
+
+    conflicts = []
+    for record in _load_worktree_records():
+        if not _fresh_worktree_record(record):
+            continue
+        if record.get("agent_id") == agent_id and record.get("branch") == branch and Path(str(record.get("path", ""))).resolve() == worktree_path:
+            if worktree_path.exists():
+                return _worktree_payload(
+                    agent_id,
+                    repo_root=repo_root,
+                    branch=branch,
+                    base_branch=base_branch,
+                    worktree_path=worktree_path,
+                    head_sha=_git_worktree_head(repo_root, worktree_path),
+                    clean=_git_worktree_clean(repo_root, worktree_path),
+                    ttl_seconds=ttl_seconds,
+                )
+        if record.get("branch") == branch or Path(str(record.get("path", ""))).resolve() == worktree_path:
+            conflicts.append(record)
+    if conflicts:
+        raise RuntimeError(f"Conflicting Scion worktree reservations detected: {_worktree_conflict_text(conflicts)}")
+
+    if worktree_path.exists() and any(worktree_path.iterdir()):
+        raise RuntimeError(f"Requested worktree path already exists and is not empty: {worktree_path}")
+
+    worktree_path.parent.mkdir(parents=True, exist_ok=True)
+    _run_git(repo_root, ["worktree", "add", "-b", branch, str(worktree_path), base_branch])
+    return _worktree_payload(
+        agent_id,
+        repo_root=repo_root,
+        branch=branch,
+        base_branch=base_branch,
+        worktree_path=worktree_path,
+        head_sha=_git_worktree_head(repo_root, worktree_path),
+        clean=_git_worktree_clean(repo_root, worktree_path),
+        ttl_seconds=ttl_seconds,
+    )
+
+
+def _remove_worktree_record(branch: str) -> None:
+    path = _worktree_record_path(branch)
+    path.unlink(missing_ok=True)
+
+
+def _remove_worktree(
+    agent_id: str,
+    *,
+    repo_root: Path,
+    branch: str,
+    worktree_path: Path,
+    force: bool,
+) -> None:
+    record_path = _worktree_record_path(branch)
+    if record_path.exists():
+        try:
+            record = _read_json(record_path)
+        except Exception:
+            record = {}
+        owner = str(record.get("agent_id", "")).strip()
+        if owner and owner != agent_id:
+            raise RuntimeError(f"Worktree reservation for {branch} is owned by {owner}, not {agent_id}.")
+
+    if worktree_path.exists():
+        args = ["worktree", "remove"]
+        if force:
+            args.append("--force")
+        args.append(str(worktree_path))
+        _run_git(repo_root, args)
+    _remove_worktree_record(branch)
 
 
 def _authoritative_claim_files(
@@ -595,6 +850,24 @@ def _inspect_state_text(*, include_events: bool = True, event_limit: int = 10) -
                 line += f" worktree={worktree}"
             lines.append(line)
 
+    worktree_records = [record for record in _load_worktree_records() if _fresh_worktree_record(record)]
+    if not worktree_records:
+        lines.append("Reserved worktrees: none")
+    else:
+        lines.append("Reserved worktrees:")
+        for record in worktree_records:
+            line = (
+                f"- owner={record.get('agent_id', 'unknown')} branch={record.get('branch', 'unknown')}"
+                f" path={record.get('path', 'unknown')}"
+            )
+            base_branch = str(record.get("base_branch", "")).strip()
+            if base_branch:
+                line += f" base={base_branch}"
+            clean = record.get("clean")
+            if clean is not None:
+                line += f" clean={str(bool(clean)).lower()}"
+            lines.append(line)
+
     if include_events:
         events = _recent_events(limit=event_limit)
         if not events:
@@ -613,6 +886,7 @@ def _prune_stale(*, event_retention_seconds: int = 86400) -> dict[str, Any]:
     stale_agents: list[str] = []
     pruned_events: list[str] = []
     stale_claims: list[str] = []
+    stale_worktrees: list[str] = []
 
     for path in sorted(_agents_dir().glob("*.json")):
         try:
@@ -666,10 +940,47 @@ def _prune_stale(*, event_retention_seconds: int = 86400) -> dict[str, Any]:
             path.unlink(missing_ok=True)
             stale_claims.append(str(path.relative_to(_claims_dir())))
 
+    for path in sorted(_worktrees_dir().rglob("*.json")):
+        remove = False
+        try:
+            record = _read_json(path)
+        except Exception:
+            remove = True
+            record = {}
+
+        owner = str(record.get("agent_id", "")).strip()
+        branch = _normalize_path(str(record.get("branch", "") or path.relative_to(_worktrees_dir()).as_posix()[:-5]))
+        worktree_path = str(record.get("path", "")).strip()
+        if not remove and not _fresh_worktree_record(record):
+            remove = True
+        if not remove and (not owner or not branch or not worktree_path):
+            remove = True
+        if not remove:
+            owner_path = _agent_state_path(owner)
+            if not owner_path.exists():
+                remove = True
+            else:
+                try:
+                    owner_state = _read_json(owner_path)
+                except Exception:
+                    remove = True
+                else:
+                    owner_worktree = owner_state.get("worktree", {})
+                    if not _fresh(owner_state):
+                        remove = True
+                    elif str(owner_worktree.get("branch", "")).strip() != branch:
+                        remove = True
+                    elif str(owner_worktree.get("path", "")).strip() != worktree_path:
+                        remove = True
+        if remove:
+            path.unlink(missing_ok=True)
+            stale_worktrees.append(str(path.relative_to(_worktrees_dir())))
+
     return {
         "stale_agents_removed": stale_agents,
         "events_removed": pruned_events,
         "claims_removed": stale_claims,
+        "worktrees_removed": stale_worktrees,
     }
 
 
@@ -716,6 +1027,8 @@ def handle_request(request: dict) -> dict:
         if not worktree_path_raw:
             return {"error": "Missing 'worktree_path' argument."}
         state = _load_agent_state(agent_id)
+        repo_root = _repo_root(args.get("repo_root"))
+        ttl = max(30, int(args.get("ttl_seconds", _default_ttl_seconds())))
         worktree = {
             "path": str(Path(worktree_path_raw).expanduser().resolve()),
             "branch": str(args.get("branch", "")).strip(),
@@ -724,6 +1037,10 @@ def handle_request(request: dict) -> dict:
             "clean": args.get("clean"),
             "registered_at": _iso_now(),
         }
+        try:
+            _upsert_worktree_record(agent_id, repo_root, worktree, ttl)
+        except RuntimeError as exc:
+            return {"error": str(exc)}
         _save_agent_state(
             agent_id,
             status=args.get("status", state.get("status", "planning")),
@@ -732,10 +1049,101 @@ def handle_request(request: dict) -> dict:
             claimed_files=state.get("claimed_files", []),
             metadata=state.get("metadata", {}),
             worktree=worktree,
-            ttl_seconds=args.get("ttl_seconds"),
+            ttl_seconds=ttl,
         )
         _record_event(agent_id, "worktree", worktree)
         return {"content": [{"type": "text", "text": f"Registered worktree for {agent_id}: {_format_worktree(worktree)}"}]}
+
+    if tool == "scion_prepare_worktree":
+        state = _load_agent_state(agent_id)
+        ttl = max(30, int(args.get("ttl_seconds", _default_ttl_seconds())))
+        branch = _normalize_path(str(args.get("branch", "")).strip() or f"codex/scion-{agent_id}")
+        base_branch = str(args.get("base_branch", "main")).strip() or "main"
+        repo_root = _repo_root(args.get("repo_root"))
+        worktree_path_raw = str(args.get("worktree_path", "")).strip()
+        worktree_path = Path(worktree_path_raw).expanduser().resolve() if worktree_path_raw else _default_worktree_path(repo_root, agent_id)
+        allow_dirty_root = bool(args.get("allow_dirty_root", False))
+        try:
+            reservation = _prepare_worktree(
+                agent_id,
+                repo_root=repo_root,
+                branch=branch,
+                base_branch=base_branch,
+                worktree_path=worktree_path,
+                allow_dirty_root=allow_dirty_root,
+                ttl_seconds=ttl,
+            )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+        _write_json(_worktree_record_path(branch), reservation)
+        worktree = _worktree_metadata_from_runtime(repo_root, worktree_path, branch, base_branch)
+        _save_agent_state(
+            agent_id,
+            status=args.get("status", state.get("status", "planning")),
+            intent=args.get("intent", state.get("intent", "")),
+            message=args.get("message", state.get("message", "")),
+            claimed_files=state.get("claimed_files", []),
+            metadata=state.get("metadata", {}),
+            worktree=worktree,
+            ttl_seconds=ttl,
+        )
+        _update_self_claim_worktree(agent_id, worktree)
+        _record_event(agent_id, "prepare-worktree", reservation)
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"Prepared worktree for {agent_id}: branch={branch} base={base_branch} "
+                        f"path={worktree_path}"
+                    ),
+                }
+            ]
+        }
+
+    if tool == "scion_remove_worktree":
+        state = _load_agent_state(agent_id)
+        worktree = state.get("worktree", {})
+        branch = _normalize_path(str(args.get("branch", "")).strip() or str(worktree.get("branch", "")).strip())
+        if not branch:
+            return {"error": "Missing branch for worktree removal."}
+        worktree_path_raw = str(args.get("worktree_path", "")).strip() or str(worktree.get("path", "")).strip()
+        if not worktree_path_raw:
+            return {"error": "Missing worktree_path for worktree removal."}
+        repo_root = _repo_root(args.get("repo_root"))
+        worktree_path = Path(worktree_path_raw).expanduser().resolve()
+        try:
+            _remove_worktree(
+                agent_id,
+                repo_root=repo_root,
+                branch=branch,
+                worktree_path=worktree_path,
+                force=bool(args.get("force", True)),
+            )
+        except RuntimeError as exc:
+            return {"error": str(exc)}
+
+        _save_agent_state(
+            agent_id,
+            status=args.get("status", state.get("status", "idle")),
+            intent=state.get("intent", ""),
+            message=args.get("message", state.get("message", "")),
+            claimed_files=state.get("claimed_files", []),
+            metadata=state.get("metadata", {}),
+            worktree={},
+            ttl_seconds=args.get("ttl_seconds"),
+        )
+        _update_self_claim_worktree(agent_id, {})
+        _record_event(agent_id, "remove-worktree", {"branch": branch, "path": str(worktree_path)})
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Removed worktree for {agent_id}: branch={branch} path={worktree_path}",
+                }
+            ]
+        }
 
     if tool == "scion_claim_files":
         files = _normalize_paths(args.get("files"))
@@ -858,6 +1266,15 @@ def handle_request(request: dict) -> dict:
             worktree=state.get("worktree", {}),
             ttl_seconds=ttl_seconds,
         )
+        try:
+            _upsert_worktree_record(
+                agent_id,
+                _repo_root(args.get("repo_root")),
+                state.get("worktree", {}),
+                max(30, int(ttl_seconds or _default_ttl_seconds())),
+            )
+        except RuntimeError:
+            pass
         for record in _self_claim_records(agent_id):
             claimed_path = _normalize_path(str(record.get("claimed_path", "")))
             if not claimed_path:
@@ -889,6 +1306,7 @@ def handle_request(request: dict) -> dict:
         text = (
             f"Pruned {len(result['stale_agents_removed'])} stale agent state file(s) "
             f"{len(result['claims_removed'])} stale claim file(s) "
+            f"{len(result['worktrees_removed'])} stale worktree record(s) "
             f"and {len(result['events_removed'])} expired event(s)."
         )
         return {"content": [{"type": "text", "text": text}]}
@@ -954,6 +1372,7 @@ if __name__ == "__main__":
                                 "properties": {
                                     "worktree_path": {"type": "string", "description": "Absolute or repo-relative worktree path."},
                                     "path": {"type": "string", "description": "Legacy alias for worktree_path."},
+                                    "repo_root": {"type": "string", "description": "Optional git repository root used for reservation context."},
                                     "branch": {"type": "string", "description": "Current branch for this worktree."},
                                     "base_branch": {"type": "string", "description": "Base branch for the worktree."},
                                     "head_sha": {"type": "string", "description": "Optional current HEAD sha."},
@@ -964,6 +1383,40 @@ if __name__ == "__main__":
                                     "ttl_seconds": {"type": "integer", "description": "Optional TTL for this agent state."},
                                 },
                                 "required": ["worktree_path"],
+                            },
+                        },
+                        {
+                            "name": "scion_prepare_worktree",
+                            "description": "Creates and reserves a git worktree for the current agent, then records its branch/path metadata in Scion state.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "repo_root": {"type": "string", "description": "Optional git repository root. Defaults to ANGELLA_ROOT/current working directory."},
+                                    "worktree_path": {"type": "string", "description": "Optional target worktree path. Defaults under /tmp or SCION_WORKTREE_ROOT."},
+                                    "branch": {"type": "string", "description": "Optional branch name. Defaults to codex/scion-<agent-id>."},
+                                    "base_branch": {"type": "string", "description": "Base branch to branch from. Defaults to main."},
+                                    "allow_dirty_root": {"type": "boolean", "description": "Allow preparing from a dirty repository root. Defaults to false."},
+                                    "status": {"type": "string", "description": "Optional updated agent status label."},
+                                    "intent": {"type": "string", "description": "Optional intent to attach to the prepared worktree."},
+                                    "message": {"type": "string", "description": "Optional message to attach to the prepared worktree."},
+                                    "ttl_seconds": {"type": "integer", "description": "Optional TTL for the agent/worktree reservation."},
+                                },
+                            },
+                        },
+                        {
+                            "name": "scion_remove_worktree",
+                            "description": "Removes the current agent's git worktree reservation and clears registered worktree metadata.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "repo_root": {"type": "string", "description": "Optional git repository root. Defaults to ANGELLA_ROOT/current working directory."},
+                                    "worktree_path": {"type": "string", "description": "Optional worktree path. Defaults to the registered worktree path."},
+                                    "branch": {"type": "string", "description": "Optional branch to remove. Defaults to the registered worktree branch."},
+                                    "force": {"type": "boolean", "description": "Whether to force worktree removal. Defaults to true."},
+                                    "status": {"type": "string", "description": "Optional updated agent status label after removal."},
+                                    "message": {"type": "string", "description": "Optional message to attach after removal."},
+                                    "ttl_seconds": {"type": "integer", "description": "Optional TTL for the updated agent state."},
+                                },
                             },
                         },
                         {

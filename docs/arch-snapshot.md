@@ -47,6 +47,7 @@ Angella/
 - **Cache Paths**: `.cache/angella/uv`, `.cache/angella/pip`
 - **Scion Shared State**: 기본 경로는 `.scion/shared`이며, 필요하면 `SCION_SHARED_DIR`로 다른 공유 디렉터리나 worktree 간 coordination 경로를 지정할 수 있습니다.
 - **Scion Ownership Model**: agent state 외에도 `.scion/shared/claims/` 아래 authoritative claim file을 둘 수 있으며, `mode=exclusive`와 `mode=takeover`를 통해 exact claim handoff와 stronger locking을 지원합니다.
+- **Scion Worktree Helpers**: `scion_prepare_worktree`와 `scion_remove_worktree`는 clean root repo를 기준으로 dedicated git worktree를 만들고 정리하는 helper입니다. reserved branch/path metadata는 `.scion/shared/worktrees/`에 기록됩니다.
 - **Scion Operations**: 운영 절차는 `docs/scion-operations.md`를 기준 문서로 삼습니다.
 - **Secrets**: `.env.agents` (Git 추적 제외, 다중 API Key 관리)
 
@@ -54,5 +55,5 @@ Angella/
 - **llm-wiki-compiler**: legacy RAG를 대체하는 현대적 마크다운 기반 지식 파이프라인.
 - **output-compactor**: 긴 터미널 출력에서 핵심 에러/결과만 추출하여 토큰 소모 40% 이상 절감.
 - **personal-context**: clipboard/calendar/reminders와 raw source ingest를 통해 OS 컨텍스트를 Angella 쪽으로 가져옵니다.
-- **scion-coordination**: Google Scion 개념을 참조하는 file-backed coordination 레이어입니다. active peer 상태, authoritative claim file, worktree registration, heartbeat, broadcast event를 shared dir에 기록해 충돌을 줄입니다.
+- **scion-coordination**: Google Scion 개념을 참조하는 file-backed coordination 레이어입니다. active peer 상태, authoritative claim file, reserved worktree record, worktree registration, heartbeat, broadcast event를 shared dir에 기록해 충돌을 줄입니다.
 - **tool-parser-wrapper**: Gemma 4의 native tool-call tag를 MCP 친화적 문자열로 정규화합니다.
