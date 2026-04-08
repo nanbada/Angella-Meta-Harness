@@ -15,12 +15,14 @@ Last updated: 2026-04-08
 - Status: implemented
 - Evidence: `setup.sh`
 - Evidence: `scripts/test_setup_flows.sh`
+- Evidence: `scripts/setup-common.sh`
 
 ## Lane 2 — install-only drift overwrite
 
 - Status: implemented
 - Evidence: `scripts/setup-install.sh`
 - Evidence: `scripts/test_setup_flows.sh`
+- Evidence: `config/goose-config.yaml`
 
 ## Lane 3 — frontier-first profile resolution
 

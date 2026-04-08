@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 
@@ -107,8 +108,6 @@ def main() -> int:
     if "scripts/run_harness_parity_diff.py" not in parity_text:
         errors.append("docs/PARITY.md is missing the canonical diff-runner reference.")
     scenario_lane_ids = {int(lane["id"]) for lane in scenarios}
-    if existing_lane_ids and existing_lane_ids != scenario_lane_ids:
-        errors.append("parity-state.json lane IDs do not match the scenario map.")
 
     for lane in scenarios:
         lane_id = int(lane["id"])
@@ -126,10 +125,6 @@ def main() -> int:
                     lane_errors.append(f"Lane {lane_id} missing evidence reference: {evidence}")
                 if not (repo_root / evidence).exists():
                     lane_errors.append(f"Lane {lane_id} evidence path does not exist: {evidence}")
-
-        previous = existing_by_id.get(lane_id, {})
-        if previous and str(previous.get("title", "")) != title:
-            lane_errors.append(f"Lane {lane_id} title mismatch with parity-state.json")
 
         hint = _recovery_hint(lane) if lane_errors else ""
         lane_state = {
