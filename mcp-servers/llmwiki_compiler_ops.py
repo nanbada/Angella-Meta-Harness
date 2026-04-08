@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+"""MCP Server for LLM-Wiki Compiler."""
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+def _load_runtime_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env_agents = PROJECT_ROOT / ".env.agents"
+    if env_agents.exists():
+        for line in env_agents.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip()
+
+    # Knowledge lives in the repo-local tree; do not forward retired overrides.
+    env.pop("ANGELLA_KNOWLEDGE_DIR", None)
+    return env
+
+
+def _knowledge_dir() -> Path:
+    knowledge_dir = (PROJECT_ROOT / "knowledge").resolve()
+    knowledge_dir.mkdir(parents=True, exist_ok=True)
+    return knowledge_dir
+
+
+def _sources_dir() -> Path:
+    sources_dir = (_knowledge_dir() / "sources").resolve()
+    sources_dir.mkdir(parents=True, exist_ok=True)
+    return sources_dir
+
+
+def _safe_note_stem(title: str) -> str:
+    stem = "".join(ch if ch.isalnum() else "_" for ch in title.strip())
+    stem = stem.strip("._")
+    while "__" in stem:
+        stem = stem.replace("__", "_")
+    if not stem:
+        raise ValueError("Title must include at least one letter or number.")
+    return stem
+
+
+def _note_path(title: str) -> Path:
+    sources_dir = _sources_dir()
+    path = (sources_dir / f"{_safe_note_stem(title)}.md").resolve()
+    if path.parent != sources_dir:
+        raise ValueError("Refusing to write outside knowledge/sources.")
+    return path
+
+
+def run_npx_llmwiki(args: list) -> str:
+    """Invokes llm-wiki-compiler from the repo-local knowledge directory."""
+
+    env = _load_runtime_env()
+    knowledge_dir = _knowledge_dir()
+
+    try:
+        cmd = ["npx", "--yes", "llm-wiki-compiler"] + args
+        result = subprocess.run(
+            cmd,
+            cwd=knowledge_dir,
+            capture_output=True,
+            text=True,
+            env=env
+        )
+        if result.returncode != 0:
+            return f"Error executing llm-wiki-compiler:\n{result.stderr}"
+        return result.stdout.strip() or "Command completed successfully."
+    except Exception as e:
+        return f"Execution exception: {e}"
+
+def handle_request(request: dict) -> dict:
+    if request.get("type") != "call_tool":
+        return {"error": "Only call_tool requests are supported."}
+
+    tool = request.get("name")
+    args = request.get("arguments", {})
+
+    if tool == "llmwiki_ingest":
+        target = args.get("target")
+        if not target:
+            return {"error": "Missing 'target' argument."}
+        output = run_npx_llmwiki(["ingest", target])
+        return {"content": [{"type": "text", "text": output}]}
+        
+    elif tool == "llmwiki_compile":
+        output = run_npx_llmwiki(["compile"])
+        return {"content": [{"type": "text", "text": output}]}
+        
+    elif tool == "llmwiki_query":
+        question = args.get("question")
+        save = args.get("save", False)
+        if not question:
+            return {"error": "Missing 'question' argument."}
+        cmd_args = ["query", question]
+        if save:
+            cmd_args.append("--save")
+        output = run_npx_llmwiki(cmd_args)
+        return {"content": [{"type": "text", "text": output}]}
+        
+    elif tool == "llmwiki_save_note":
+        title = args.get("title")
+        content = args.get("content")
+        if not title or not content:
+            return {"error": "Missing 'title' or 'content' argument."}
+
+        try:
+            file_path = _note_path(title)
+        except ValueError as exc:
+            return {"error": str(exc)}
+
+        file_path.write_text(f"# {title}\n\n{content}", encoding="utf-8")
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Successfully saved note to {file_path}. Run llmwiki_compile to index it.",
+                }
+            ]
+        }
+        
+    else:
+        return {"error": f"Unknown tool: {tool}"}
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--describe":
+        print(json.dumps({
+            "tools": [
+                {
+                    "name": "llmwiki_ingest",
+                    "description": "Downloads and adds a new source document/URL to the LLM-Wiki sources directory.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "target": {"type": "string", "description": "The URL or path to the file to ingest."}
+                        },
+                        "required": ["target"]
+                    }
+                },
+                {
+                    "name": "llmwiki_compile",
+                    "description": "Compiles all sources into interlinked Wikipedia-style markdown pages. Run this after ingesting sources or making manual edits to sources.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                },
+                {
+                    "name": "llmwiki_query",
+                    "description": "Queries the compiled wiki knowledge base for an answer.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "question": {"type": "string", "description": "The question to ask the wiki."},
+                            "save": {"type": "boolean", "description": "If true, the answer will be permanently saved as a new wiki page for future compounding knowledge."}
+                        },
+                        "required": ["question"]
+                    }
+                },
+                {
+                    "name": "llmwiki_save_note",
+                    "description": "Saves raw text content (e.g. from clipboard or agent thoughts) directly as a new source file in the knowledge base.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string", "description": "A descriptive title for the note."},
+                            "content": {"type": "string", "description": "The markdown content of the note."}
+                        },
+                        "required": ["title", "content"]
+                    }
+                }
+            ]
+        }))
+        sys.exit(0)
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+            res = handle_request(req)
+            print(json.dumps(res), flush=True)
+        except Exception as e:
+            print(json.dumps({"error": str(e)}), flush=True)

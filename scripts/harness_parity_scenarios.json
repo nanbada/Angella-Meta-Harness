@@ -1,0 +1,75 @@
+{
+  "lanes": [
+    {
+      "id": 1,
+      "title": "setup check clean exit",
+      "status": "implemented",
+      "evidence": [
+        "setup.sh",
+        "scripts/test_setup_flows.sh",
+        "scripts/setup-common.sh"
+      ]
+    },
+    {
+      "id": 2,
+      "title": "install-only drift overwrite",
+      "status": "implemented",
+      "evidence": [
+        "scripts/setup-install.sh",
+        "scripts/test_setup_flows.sh",
+        "config/goose-config.yaml"
+      ]
+    },
+    {
+      "id": 3,
+      "title": "frontier-first profile resolution",
+      "status": "implemented",
+      "evidence": [
+        "scripts/harness_catalog.py",
+        "scripts/test_harness_self_optimize_adapter.py",
+        "scripts/test_frontier_harness_reset.py"
+      ]
+    },
+    {
+      "id": 4,
+      "title": "multi-tier personal agent & llm-wiki integration",
+      "status": "implemented",
+      "evidence": [
+        "recipes/personal-agent-loop.yaml",
+        "mcp-servers/llmwiki_compiler_ops.py",
+        "mcp-servers/personal_context_ops.py",
+        "scripts/test_harness_knowledge.py"
+      ]
+    },
+    {
+      "id": 5,
+      "title": "output compaction path",
+      "status": "implemented",
+      "evidence": [
+        "mcp-servers/output_compactor.py",
+        "scripts/test_harness_knowledge.py"
+      ]
+    },
+    {
+      "id": 6,
+      "title": "google scion coordination (file-backed mvp)",
+      "status": "implemented",
+      "evidence": [
+        "mcp-servers/scion_coordination_ops.py",
+        "recipes/autoresearch-loop.yaml",
+        "scripts/test_scion_coordination.py",
+        "docs/arch-snapshot.md"
+      ]
+    },
+    {
+      "id": 7,
+      "title": "retired meta-loop/control-plane surface removed",
+      "status": "implemented",
+      "evidence": [
+        "config/goose-config.yaml",
+        ".goosehints",
+        "scripts/test_meta_loop_admin.py"
+      ]
+    }
+  ]
+}

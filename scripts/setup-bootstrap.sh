@@ -7,6 +7,8 @@ export ANGELLA_ROOT="$ROOT_DIR"
 # shellcheck source=./setup-common.sh
 source "$ROOT_DIR/scripts/setup-common.sh"
 
+load_mlx_environment false
+
 check_homebrew
 ensure_goose
 detect_python_runtime
@@ -28,12 +30,17 @@ if [ "$CHECK_ONLY" = true ]; then
         ensure_ollama_server
         ensure_models
     fi
+    if [ "$ANGELLA_WORKER_PROVIDER" = "angella_mlx_local" ] && [ "$ANGELLA_MLX_ENABLED" != "true" ]; then
+        fail "Selected MLX worker is not available. Check ANGELLA_LOCAL_WORKER_BACKEND=mlx and ANGELLA_MLX_BASE_URL."
+        exit 1
+    fi
     if [ "$ANGELLA_WORKER_PROVIDER" = "angella_apfel_local" ] && [ "$ANGELLA_APFEL_ENABLED" != "true" ]; then
-        fail "Selected apfel worker is not available. Check ANGELLA_APFEL_BASE_URL and provider health."
+        fail "Selected legacy apfel worker is not available. Check ANGELLA_APFEL_BASE_URL or migrate to ANGELLA_MLX_BASE_URL."
         exit 1
     fi
     check_python_requirements_support
     create_control_plane_layout
+    write_bootstrap_state
     write_harness_resolution_snapshot
     exit 0
 fi
@@ -63,8 +70,12 @@ if [ "$ANGELLA_WORKER_PROVIDER" = "ollama" ]; then
     ensure_ollama_server
     ensure_models
 fi
+if [ "$ANGELLA_WORKER_PROVIDER" = "angella_mlx_local" ] && [ "$ANGELLA_MLX_ENABLED" != "true" ]; then
+    fail "Selected MLX worker is not available. Check ANGELLA_LOCAL_WORKER_BACKEND=mlx and ANGELLA_MLX_BASE_URL."
+    exit 1
+fi
 if [ "$ANGELLA_WORKER_PROVIDER" = "angella_apfel_local" ] && [ "$ANGELLA_APFEL_ENABLED" != "true" ]; then
-    fail "Selected apfel worker is not available. Check ANGELLA_APFEL_BASE_URL and provider health."
+    fail "Selected legacy apfel worker is not available. Check ANGELLA_APFEL_BASE_URL or migrate to ANGELLA_MLX_BASE_URL."
     exit 1
 fi
 ensure_bootstrap_environment "$PYTHON_CMD"

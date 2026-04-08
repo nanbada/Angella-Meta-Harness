@@ -9,8 +9,13 @@ Run-scoped logging MCP for Angella transparency.
 import datetime
 import json
 import os
-import re
 
+from control_plane import (
+    normalize_intent_contract,
+    record_loop_iteration,
+    safe_run_id,
+    write_final_summary,
+)
 from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -18,7 +23,6 @@ from mcp.server.stdio import stdio_server
 server = Server("obsidian-auto-log")
 ANGELLA_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_VAULT_PATH = os.path.join(ANGELLA_ROOT, "logs")
-DEFAULT_CONTROL_PLANE_PATH = os.path.join(ANGELLA_ROOT, ".cache", "angella", "control-plane")
 
 
 def _resolve_vault_path() -> str:
@@ -32,61 +36,30 @@ def _get_log_dir() -> str:
     return log_dir
 
 
-def _resolve_control_plane_path() -> str:
-    configured = os.environ.get("ANGELLA_CONTROL_PLANE_DIR") or DEFAULT_CONTROL_PLANE_PATH
-    return os.path.abspath(os.path.expanduser(configured))
-
-
-def _ensure_control_plane_layout() -> dict[str, str]:
-    root = _resolve_control_plane_path()
-    paths = {
-        "root": root,
-        "runs": os.path.join(root, "runs"),
-        "failures_open": os.path.join(root, "failures", "open"),
-        "failures_closed": os.path.join(root, "failures", "closed"),
-        "knowledge_sops": os.path.join(root, "knowledge", "sops"),
-        "knowledge_skills": os.path.join(root, "knowledge", "skills"),
-        "meta_loop": os.path.join(root, "queue", "meta-loop"),
-    }
-    for path in paths.values():
-        if path != root:
-            os.makedirs(path, exist_ok=True)
-    os.makedirs(root, exist_ok=True)
-    return paths
-
-
-def _run_dir(run_id: str) -> str:
-    layout = _ensure_control_plane_layout()
-    path = os.path.join(layout["runs"], _safe_run_id(run_id))
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def _append_jsonl(path: str, payload: dict) -> None:
-    with open(path, "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
-
-
-def _safe_run_id(run_id: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]+", "-", run_id).strip("-") or "angella-run"
+def _format_list(items: list[str]) -> str:
+    if not items:
+        return "- _None_"
+    return "\n".join(f"- {item}" for item in items)
 
 
 def _format_intent_contract(intent_contract: dict | None) -> str:
-    if not intent_contract:
-        return "_Not recorded_\n"
-
-    first_hypotheses = intent_contract.get("first_hypotheses", [])
-    if isinstance(first_hypotheses, list):
-        hypotheses_text = "\n".join(f"- {item}" for item in first_hypotheses) or "- _None_"
-    else:
-        hypotheses_text = str(first_hypotheses)
+    normalized = normalize_intent_contract(intent_contract or {})
+    validation = normalized.get("validation", {})
+    missing = validation.get("missing_required_fields", [])
 
     return (
-        f"- `intent_summary`: {intent_contract.get('intent_summary', '')}\n"
-        f"- `metric_reason`: {intent_contract.get('metric_reason', '')}\n"
-        f"- `non_goals`: {intent_contract.get('non_goals', '')}\n"
-        f"- `success_threshold`: {intent_contract.get('success_threshold', '')}\n"
-        f"- `first_hypotheses`:\n{hypotheses_text}\n"
+        f"- `ideal_state_8_12_words`: {normalized.get('ideal_state_8_12_words', '') or '_Missing_'}\n"
+        f"- `metric_key`: {normalized.get('metric_key', '') or '_Missing_'}\n"
+        f"- `intent_summary`: {normalized.get('intent_summary', '') or '_Not recorded_'}\n"
+        f"- `metric_reason`: {normalized.get('metric_reason', '') or '_Not recorded_'}\n"
+        f"- `success_threshold`: {normalized.get('success_threshold', '') or '_Missing_'}\n"
+        f"- `binary_acceptance_checks`:\n{_format_list(normalized.get('binary_acceptance_checks', []))}\n"
+        f"- `non_goals`:\n{_format_list(normalized.get('non_goals', []))}\n"
+        f"- `operator_constraints`:\n{_format_list(normalized.get('operator_constraints', []))}\n"
+        f"- `first_hypotheses`:\n{_format_list(normalized.get('first_hypotheses', []))}\n"
+        f"- `validation`: word_count={validation.get('ideal_state_word_count', 0)}, "
+        f"target_ok={validation.get('ideal_state_target_ok', False)}, "
+        f"missing={missing or '[]'}\n"
     )
 
 
@@ -136,12 +109,12 @@ async def list_tools() -> list[types.Tool]:
                     "proposals": {"type": "string", "default": ""},
                     "intent_contract": {
                         "type": "object",
-                        "description": "Intent Contract 구조체",
+                        "description": "Intent Contract. Required keys: ideal_state_8_12_words, metric_key, success_threshold, binary_acceptance_checks, non_goals, operator_constraints.",
                         "default": {},
                     },
                     "harness_metadata": {
                         "type": "object",
-                        "description": "선택된 lead/planner/worker 및 capability metadata",
+                        "description": "선택된 profile/model ids, resolved provider/model names, env capability snapshot metadata.",
                         "default": {},
                     },
                     "aux_metrics": {
@@ -191,10 +164,12 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "intent_contract": {
                         "type": "object",
+                        "description": "Intent Contract. Required keys: ideal_state_8_12_words, metric_key, success_threshold, binary_acceptance_checks, non_goals, operator_constraints.",
                         "default": {},
                     },
                     "harness_metadata": {
                         "type": "object",
+                        "description": "선택된 profile/model ids, resolved provider/model names, env capability snapshot metadata.",
                         "default": {},
                     },
                     "aux_metrics": {
@@ -241,9 +216,10 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         intent_contract = arguments.get("intent_contract", {})
         harness_metadata = arguments.get("harness_metadata", {})
         aux_metrics = arguments.get("aux_metrics", {})
+        normalized_intent = normalize_intent_contract(intent_contract, metric_key=metric_key)
 
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        filename = f"{_safe_run_id(run_id)}.md"
+        filename = f"{safe_run_id(run_id)}.md"
         filepath = os.path.join(_get_log_dir(), filename)
 
         if not os.path.exists(filepath):
@@ -255,7 +231,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 f"- `benchmark_command`: `{benchmark_command}`\n"
                 f"- `log_root`: `{_resolve_vault_path()}`\n\n"
                 "## Intent Contract\n"
-                f"{_format_intent_contract(intent_contract)}\n"
+                f"{_format_intent_contract(normalized_intent)}\n"
             )
             with open(filepath, "w", encoding="utf-8") as handle:
                 handle.write(header)
@@ -288,54 +264,26 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         with open(filepath, "a", encoding="utf-8") as handle:
             handle.write(content)
 
-        run_dir = _run_dir(run_id)
-        intent_path = os.path.join(run_dir, "intent.json")
-        if intent_contract and not os.path.exists(intent_path):
-            with open(intent_path, "w", encoding="utf-8") as handle:
-                json.dump(intent_contract, handle, indent=2, ensure_ascii=False)
-
-        telemetry_event = {
-            "timestamp": now,
-            "run_id": run_id,
-            "project_name": project_name,
-            "iteration": iteration,
-            "decision": decision,
-            "metric_key": metric_key,
-            "metric_value": metric_value,
-            "baseline_value": baseline_value,
-            "improvement_percent": improvement_percent,
-            "start_commit": start_commit,
-            "candidate_commit": candidate_commit,
-            "benchmark_command": benchmark_command,
-            "working_directory": working_directory,
-            "failure_reason": failure_reason,
-            "harness_metadata": harness_metadata,
-            "aux_metrics": aux_metrics,
-        }
-        _append_jsonl(os.path.join(run_dir, "telemetry.jsonl"), telemetry_event)
-
-        if decision in {"failure", "revert"} and failure_reason:
-            layout = _ensure_control_plane_layout()
-            failure_path = os.path.join(
-                layout["failures_open"],
-                f"{_safe_run_id(run_id)}-iter-{iteration}.json",
-            )
-            failure_payload = {
-                "component": harness_metadata.get("objective_component", "unspecified"),
-                "failure_type": failure_reason,
-                "reproduction": benchmark_command,
-                "expected": f"Metric improves by at least {improvement_percent} or threshold requirement",
-                "observed": {
-                    "decision": decision,
-                    "metric_key": metric_key,
-                    "metric_value": metric_value,
-                    "baseline_value": baseline_value,
-                },
-                "candidate_fix_area": proposals or summary,
-                "source_run_id": run_id,
-            }
-            with open(failure_path, "w", encoding="utf-8") as handle:
-                json.dump(failure_payload, handle, indent=2, ensure_ascii=False)
+        artifacts = record_loop_iteration(
+            run_id=run_id,
+            project_name=project_name,
+            iteration=iteration,
+            decision=decision,
+            metric_key=metric_key,
+            metric_value=metric_value,
+            baseline_value=baseline_value,
+            improvement_percent=improvement_percent,
+            start_commit=start_commit,
+            candidate_commit=candidate_commit,
+            benchmark_command=benchmark_command,
+            working_directory=working_directory,
+            summary=summary,
+            failure_reason=failure_reason,
+            proposals=proposals,
+            intent_contract=normalized_intent,
+            harness_metadata=harness_metadata,
+            aux_metrics=aux_metrics,
+        )
 
         return [
             types.TextContent(
@@ -347,6 +295,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                         "run_id": run_id,
                         "iteration": iteration,
                         "decision": decision,
+                        "run_dir": artifacts["run_dir"],
                     },
                     ensure_ascii=False,
                 ),
@@ -372,6 +321,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         intent_contract = arguments.get("intent_contract", {})
         harness_metadata = arguments.get("harness_metadata", {})
         aux_metrics = arguments.get("aux_metrics", {})
+        normalized_intent = normalize_intent_contract(intent_contract, metric_key=metric_key)
 
         lower_is_better = metric_key in ("build_time", "latency_ms", "bundle_size")
         if initial_metric > 0:
@@ -383,7 +333,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             change_pct = 0.0
 
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        filename = f"{_safe_run_id(run_id)}-FINAL.md"
+        filename = f"{safe_run_id(run_id)}-FINAL.md"
         filepath = os.path.join(_get_log_dir(), filename)
 
         content = (
@@ -396,7 +346,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             f"- `working_directory`: {working_directory}\n"
             f"- `benchmark_command`: `{benchmark_command}`\n\n"
             "## Intent Contract\n"
-            f"{_format_intent_contract(intent_contract)}\n"
+            f"{_format_intent_contract(normalized_intent)}\n"
             "## Result\n\n"
             "| Metric | Initial | Final | Change |\n"
             "|--------|---------|-------|--------|\n"
@@ -420,26 +370,25 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         with open(filepath, "w", encoding="utf-8") as handle:
             handle.write(content)
 
-        run_dir = _run_dir(run_id)
-        summary_payload = {
-            "run_id": run_id,
-            "project_name": project_name,
-            "total_iterations": total_iterations,
-            "metric_key": metric_key,
-            "initial_metric": initial_metric,
-            "final_metric": final_metric,
-            "improvements_kept": improvements_kept,
-            "summary": summary,
-            "failure_reasons": failure_reasons,
-            "harness_metadata": harness_metadata,
-            "intent_contract": intent_contract,
-            "aux_metrics": aux_metrics,
-            "start_commit": start_commit,
-            "final_commit": final_commit,
-            "run_branch": run_branch,
-        }
-        with open(os.path.join(run_dir, "summary.json"), "w", encoding="utf-8") as handle:
-            json.dump(summary_payload, handle, indent=2, ensure_ascii=False)
+        summary_artifacts = write_final_summary(
+            run_id=run_id,
+            project_name=project_name,
+            total_iterations=total_iterations,
+            initial_metric=initial_metric,
+            final_metric=final_metric,
+            metric_key=metric_key,
+            improvements_kept=improvements_kept,
+            summary=summary,
+            start_commit=start_commit,
+            final_commit=final_commit,
+            run_branch=run_branch,
+            benchmark_command=benchmark_command,
+            working_directory=working_directory,
+            failure_reasons=failure_reasons,
+            intent_contract=normalized_intent,
+            harness_metadata=harness_metadata,
+            aux_metrics=aux_metrics,
+        )
 
         return [
             types.TextContent(
@@ -451,6 +400,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                         "run_id": run_id,
                         "total_iterations": total_iterations,
                         "improvement_percent": change_pct,
+                        "summary_path": summary_artifacts["summary_path"],
                     },
                     ensure_ascii=False,
                 ),

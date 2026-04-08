@@ -5,6 +5,8 @@ __pycache__/
 logs/
 .config/
 .cache/
+.scion/
+venv/
 
 # Local environment and secret material
 .env
@@ -25,3 +27,4 @@ config/Modelfile.*.local
 
 # Local reference notes
 reference.md
+.env.agents

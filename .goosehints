@@ -2,24 +2,38 @@
 # 이 파일은 Goose가 프로젝트를 이해하는 데 도움을 줍니다.
 
 이 프로젝트는 MacBook Pro M3 36GB에서 Goose AI Agent의
-Autoresearch Self-Optimize Loop를 구현합니다.
-공식 기본 flow는 `recipes/autoresearch-loop.yaml` 하나이지만,
-harness 자체는 lead/planner/worker를 catalog/selector로 해상하는 adaptive 구조입니다.
+Frontier-First Personal Agent Harness를 구현합니다.
+
+## 시작 순서 (가장 중요)
+대화를 시작하면 아래 파일을 먼저 읽으세요.
+1. `README.md`
+2. `docs/arch-snapshot.md`
+3. `plan.md`
+
+규격과 행동 원칙이 더 필요하면 아래를 추가로 읽으세요.
+- `docs/spec-contracts.md`
+- `knowledge/sops/harness-philosophy.md`
 
 ## 프로젝트 구조
-- `recipes/` — Goose recipe YAML 파일들
-- `mcp-servers/` — Python MCP 서버들 (metric benchmark, obsidian logger)
+- `recipes/` — Goose recipe YAML 파일들 (`autoresearch-loop`, `personal-agent-loop`)
+- `mcp-servers/` — Python MCP 서버들 (benchmark, llm-wiki, output compaction, personal context, scion pilot, tool parser)
 - `config/` — Goose config 템플릿 + harness catalog/profile
 - `.env.mlx.example` — 커밋되는 MLX 환경변수 예시
-- `knowledge/` — reusable SOP/skill 자산
+- `knowledge/` — 공유 wiki 저장소 (현재 repo 내부 디렉터리)
+
+`knowledge/`의 실제 위치는 아키텍처의 본질이 아닙니다.
+핵심은 다른 프로젝트와 외부 채널에서도 재사용 가능한 공유 wiki여야 한다는 점이며,
+필요하면 다시 외부 경로 symlink로 바꾸거나, 다른 소비자가 이 repo 내부 경로를 직접 참조할 수 있습니다.
 
 ## MCP 서버
 모든 MCP 서버는 Python의 `mcp` 패키지를 사용하며 stdio 방식으로 통신합니다.
 - `metric_benchmark.py` — 기본 benchmark backend (`run_benchmark`, `compare_metrics`)
-- `metric_benchmark_nextjs.py` — Next.js adapter
-- `metric_benchmark_python.py` — Python inference adapter
-- `metric_benchmark_swift.py` — Swift/Xcode adapter
 - `obsidian_auto_log.py` — run-scoped 로그 저장 (`save_loop_log`, `save_final_report`)
+- `llmwiki_compiler_ops.py` — LLM-Wiki query/compile/save note
+- `output_compactor.py` — 긴 출력 압축
+- `personal_context_ops.py` — 로컬 OS 컨텍스트/원천 자료 ingest
+- `scion_coordination_ops.py` — Scion pilot/mock coordination
+- `tool_parser_wrapper.py` — Gemma 4 tool-call tag 보정
 
 Benchmark 계층의 핵심 출력 계약:
 - `success`
@@ -33,7 +47,7 @@ Benchmark 계층의 핵심 출력 계약:
 
 ## 레시피
 - `autoresearch-loop.yaml` — 메인 Autoresearch ratchet loop
-- `harness-self-optimize.yaml` — harness 자체를 개선하는 meta-loop
+- `personal-agent-loop.yaml` — 개인 비서/OS 컨텍스트 루프
 - `sub/code-optimize.yaml` — 선택형 adapter용 구현 보조 블록
 - `sub/evaluate-metric.yaml` — 선택형 adapter용 benchmark 보조 블록
 
@@ -42,6 +56,14 @@ Benchmark 계층의 핵심 출력 계약:
 - 전용 run branch `angella/run-<timestamp>`에서만 실행
 - baseline 전에 Intent Contract와 `start_commit` 고정
 - keep/revert/failure를 모두 `run_id` 기준 로그에 기록
+- 긴 로그는 `output_compactor`로 먼저 압축
+- 광범위한 변경 전에는 `scion_query_peers`로 pilot coordination 확인
+
+## retired 표면
+아래 항목은 의도적으로 retired 상태입니다. 새로운 구현이나 리뷰에서 참조하지 마세요.
+- `mcp-servers/meta_loop_ops.py`
+- `mcp-servers/control_plane_admin.py`
+- `recipes/harness-self-optimize.yaml`
 
 ## 환경
 - Ollama MLX 백엔드 (qwen2.5-coder:32b, gemma4:26b, optional preview worker)

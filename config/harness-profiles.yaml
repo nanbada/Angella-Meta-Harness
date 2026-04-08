@@ -1,107 +1,151 @@
 {
   "profiles": [
     {
-      "id": "default",
-      "display_name": "Default Frontier + Local Coder",
+      "id": "frontier_default",
+      "display_name": "Frontier Default",
       "default": true,
       "lead_selector": "best_reasoning_frontier",
       "planner_selector": "best_reasoning_frontier",
-      "worker_selector": "best_local_coder",
-      "non_goals": [
-        "Hard-code Gemini as permanent lead",
-        "Use preview worker by default",
-        "Select apfel unless explicitly needed for latency"
-      ],
-      "mlx_policy": {
-        "preferred_context_limit": 16384,
-        "sweet_spot_min": 8192,
-        "sweet_spot_max": 16384,
-        "default_num_parallel": 2,
-        "nvfp4_preferred": false
-      },
+      "worker_selector": "best_reasoning_frontier_low_cost",
+      "execution_mode": "frontier_primary",
+      "worker_tier_default": "frontier_primary",
+      "local_cache_enabled": true,
+      "token_saver_enabled": false,
       "capability_flags": {
-        "worker_required_flags": ["mlx_local"]
-      }
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"]
+      },
+      "non_goals": [
+        "Prefer local worker when a frontier worker is available",
+        "Treat local runtime as the primary path",
+        "Optimize for lowest cost before quality"
+      ]
     },
     {
-      "id": "frontier_low_cost",
-      "display_name": "Frontier Low Cost + Local Coder",
-      "lead_selector": "best_reasoning_frontier_low_cost",
-      "planner_selector": "best_reasoning_frontier_low_cost",
-      "worker_selector": "best_local_coder",
-      "non_goals": [
-        "Use the most expensive frontier model when lower-cost frontier is sufficient"
-      ],
-      "mlx_policy": {
-        "preferred_context_limit": 16384,
-        "sweet_spot_min": 8192,
-        "sweet_spot_max": 16384,
-        "default_num_parallel": 2,
-        "nvfp4_preferred": false
-      },
-      "capability_flags": {
-        "worker_required_flags": ["mlx_local"]
-      }
-    },
-    {
-      "id": "local_reasoning",
-      "display_name": "Frontier Lead + Local Reasoning Worker",
+      "id": "frontier_quality",
+      "display_name": "Frontier Quality",
       "lead_selector": "best_reasoning_frontier",
       "planner_selector": "best_reasoning_frontier",
-      "worker_selector": "best_local_reasoning",
-      "non_goals": [
-        "Optimize for absolute lowest latency"
-      ],
-      "mlx_policy": {
-        "preferred_context_limit": 8192,
-        "sweet_spot_min": 8192,
-        "sweet_spot_max": 16384,
-        "default_num_parallel": 2,
-        "nvfp4_preferred": false
-      },
+      "worker_selector": "best_reasoning_frontier",
+      "execution_mode": "frontier_primary",
+      "worker_tier_default": "frontier_primary",
+      "local_cache_enabled": true,
+      "token_saver_enabled": false,
       "capability_flags": {
-        "worker_required_flags": ["mlx_local"]
-      }
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"],
+        "worker_required_flags": ["reasoning"]
+      },
+      "non_goals": [
+        "Trade quality away to save cost by default"
+      ]
     },
     {
-      "id": "low_latency_apfel",
-      "display_name": "Frontier Lead + apfel Low Latency Worker",
+      "id": "frontier_cost_guarded",
+      "display_name": "Frontier Cost Guarded",
       "lead_selector": "best_reasoning_frontier_low_cost",
       "planner_selector": "best_reasoning_frontier_low_cost",
-      "worker_selector": "best_local_low_latency",
-      "non_goals": [
-        "Use slower local reasoning worker when immediate latency matters most"
-      ],
-      "mlx_policy": {
-        "preferred_context_limit": 8192,
-        "sweet_spot_min": 8192,
-        "sweet_spot_max": 8192,
-        "default_num_parallel": 2,
-        "nvfp4_preferred": false
-      },
+      "worker_selector": "best_reasoning_frontier_low_cost",
+      "execution_mode": "frontier_cost_guarded",
+      "worker_tier_default": "frontier_primary",
+      "local_cache_enabled": true,
+      "token_saver_enabled": true,
       "capability_flags": {
-        "worker_required_flags": ["low_latency"]
-      }
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"]
+      },
+      "non_goals": [
+        "Use a local worker to reduce cost when frontier is still available",
+        "Print verbose raw logs or full files; always use output_compactor to compress context to save tokens"
+      ]
     },
     {
-      "id": "preview_nvfp4",
-      "display_name": "Frontier Lead + NVFP4 Preview Worker",
+      "id": "frontier_private_fallback",
+      "display_name": "Frontier Private Fallback",
       "lead_selector": "best_reasoning_frontier",
       "planner_selector": "best_reasoning_frontier",
-      "worker_selector": "best_local_coder",
-      "non_goals": [
-        "Use preview worker on unsupported hosts"
-      ],
-      "mlx_policy": {
-        "preferred_context_limit": 8192,
-        "sweet_spot_min": 8192,
-        "sweet_spot_max": 16384,
-        "default_num_parallel": 2,
-        "nvfp4_preferred": true
-      },
+      "worker_selector": "best_reasoning_frontier_low_cost",
+      "fallback_worker_selector": "best_local_fallback",
+      "execution_mode": "frontier_private_fallback",
+      "worker_tier_default": "frontier_primary",
+      "local_cache_enabled": true,
+      "token_saver_enabled": true,
       "capability_flags": {
-        "worker_required_flags": ["preview", "mlx_local"]
-      }
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"],
+        "fallback_worker_required_flags": ["local"]
+      },
+      "fallback_when_any": [
+        "private_mode",
+        "token_limited",
+        "network_blocked",
+        "frontier_unreachable"
+      ],
+      "non_goals": [
+        "Stay on frontier worker when privacy or connectivity constraints explicitly require fallback",
+        "Read raw extensive logs; use token-saving strategies and output_compactor if token_limited fallback triggered"
+      ]
+    },
+    {
+      "id": "local_lab",
+      "display_name": "Local Lab",
+      "lead_selector": "best_reasoning_frontier",
+      "planner_selector": "best_reasoning_frontier",
+      "worker_selector": "best_local_fallback",
+      "execution_mode": "local_lab",
+      "worker_tier_default": "local_augment",
+      "local_cache_enabled": true,
+      "token_saver_enabled": true,
+      "capability_flags": {
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"],
+        "worker_required_flags": ["local"]
+      },
+      "non_goals": [
+        "Overload the local worker context window with full build outputs; strictly summarize with output_compactor"
+      ]
+    },
+    {
+      "id": "frontier_token_saver_lab",
+      "display_name": "Frontier Token Saver Lab",
+      "lead_selector": "best_reasoning_frontier_low_cost",
+      "planner_selector": "best_reasoning_frontier_low_cost",
+      "worker_selector": "best_reasoning_frontier_low_cost",
+      "execution_mode": "frontier_cost_guarded",
+      "worker_tier_default": "frontier_primary",
+      "local_cache_enabled": true,
+      "token_saver_enabled": true,
+      "capability_flags": {
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"]
+      },
+      "non_goals": [
+        "Read raw extensive logs; use token-saving strategies and output_compactor to minimize context window usage"
+      ]
+    },
+    {
+      "id": "personal_agent_tier",
+      "display_name": "Personal Agent (Multi-Tier)",
+      "lead_selector": "best_reasoning_frontier",
+      "planner_selector": "best_reasoning_frontier",
+      "worker_selector": "best_coding_frontier",
+      "fallback_worker_selector": "best_local_fallback",
+      "execution_mode": "personal_hybrid",
+      "worker_tier_default": "hybrid",
+      "local_cache_enabled": true,
+      "token_saver_enabled": false,
+      "capability_flags": {
+        "lead_required_flags": ["reasoning"],
+        "planner_required_flags": ["reasoning"],
+        "worker_required_flags": ["reasoning"]
+      },
+      "fallback_when_any": [
+        "local_context_needed",
+        "private_mode"
+      ],
+      "non_goals": [
+        "Relying solely on one provider for all cognitive tasks"
+      ]
     }
   ]
 }

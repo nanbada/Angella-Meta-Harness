@@ -24,7 +24,13 @@ jobs:
         run: bash -n setup.sh
 
       - name: Python Syntax
-        run: python3 -m py_compile mcp-servers/common.py mcp-servers/metric_benchmark.py mcp-servers/metric_benchmark_nextjs.py mcp-servers/metric_benchmark_python.py mcp-servers/metric_benchmark_swift.py mcp-servers/obsidian_auto_log.py
+        run: python3 -m py_compile mcp-servers/*.py scripts/*.py
+
+      - name: Parity Diff
+        run: python3 scripts/run_harness_parity_diff.py
+
+      - name: Harness Schema Validation
+        run: python3 scripts/validate_harness_schema.py
 
       - name: Setup Flow Tests
         run: bash scripts/test_setup_flows.sh

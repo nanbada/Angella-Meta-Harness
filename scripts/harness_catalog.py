@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
 import json
 import os
 import shlex
 import sys
-import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -12,10 +13,51 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MODELS_PATH = ROOT_DIR / "config" / "harness-models.yaml"
 PROFILES_PATH = ROOT_DIR / "config" / "harness-profiles.yaml"
+LEGACY_PROFILE_MIGRATIONS = {
+    "default": "frontier_default",
+    "frontier_low_cost": "frontier_cost_guarded",
+    "local_reasoning": "local_lab",
+    "low_latency_apfel": "local_lab",
+    "preview_nvfp4": "local_lab",
+}
+FRONTIER_PROVIDERS = {"google", "anthropic", "openai"}
 
 
 def load_json_yaml(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _bool_env(name: str) -> bool:
+    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _first_env(*names: str) -> str:
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def effective_local_worker_backend() -> str:
+    backend = os.environ.get("ANGELLA_LOCAL_WORKER_BACKEND", "").strip().lower()
+    if backend:
+        return backend
+    if _first_env("ANGELLA_MLX_BASE_URL", "ANGELLA_MLX_MODEL", "ANGELLA_APFEL_BASE_URL", "ANGELLA_APFEL_MODEL"):
+        return "mlx"
+    return ""
+
+
+def effective_mlx_base_url() -> str:
+    return _first_env("ANGELLA_MLX_BASE_URL", "ANGELLA_APFEL_BASE_URL")
+
+
+def effective_mlx_model(default: str) -> str:
+    return _first_env("ANGELLA_MLX_MODEL", "ANGELLA_APFEL_MODEL") or default
+
+
+def effective_apfel_model(default: str) -> str:
+    return os.environ.get("ANGELLA_APFEL_MODEL", "").strip() or default
 
 
 def ollama_tags() -> dict:
@@ -36,8 +78,8 @@ def model_present(tags: dict, model_name: str) -> bool:
     return any(item.get("name") == model_name for item in tags.get("models", []))
 
 
-def apfel_healthy(base_url: str) -> bool:
-    override = os.environ.get("ANGELLA_APFEL_HEALTHCHECK_OK")
+def local_openai_compatible_healthy(base_url: str, *, override_envs: tuple[str, ...]) -> bool:
+    override = _first_env(*override_envs)
     if override == "1":
         return True
     if override == "0":
@@ -55,6 +97,28 @@ def apfel_healthy(base_url: str) -> bool:
     return False
 
 
+def mlx_healthy(base_url: str) -> bool:
+    return local_openai_compatible_healthy(
+        base_url,
+        override_envs=("ANGELLA_MLX_HEALTHCHECK_OK", "ANGELLA_APFEL_HEALTHCHECK_OK"),
+    )
+
+
+def apfel_healthy(base_url: str) -> bool:
+    return local_openai_compatible_healthy(
+        base_url,
+        override_envs=("ANGELLA_APFEL_HEALTHCHECK_OK", "ANGELLA_MLX_HEALTHCHECK_OK"),
+    )
+
+
+def resolved_runtime_model(model: dict) -> str:
+    if model["id"] == "mlx_gemma4_31b_it_4bit":
+        return effective_mlx_model(model["model"])
+    if model["id"] == "apfel_foundationmodel":
+        return effective_apfel_model(model["model"])
+    return model["model"]
+
+
 def availability_for_model(model: dict, tags: dict) -> tuple[bool, list[str], bool]:
     reasons: list[str] = []
     provisionable = False
@@ -67,7 +131,10 @@ def availability_for_model(model: dict, tags: dict) -> tuple[bool, list[str], bo
         if check.startswith("ollama_model:"):
             model_name = check.split(":", 1)[1]
             if not tags.get("models"):
-                reasons.append("ollama_unreachable")
+                if model.get("auto_pull_on_bootstrap", False):
+                    provisionable = True
+                else:
+                    reasons.append("ollama_unreachable")
             elif not model_present(tags, model_name):
                 if model.get("auto_pull_on_bootstrap", False):
                     provisionable = True
@@ -78,6 +145,16 @@ def availability_for_model(model: dict, tags: dict) -> tuple[bool, list[str], bo
             key, expected = expr.split("=", 1)
             if os.environ.get(key) != expected:
                 reasons.append(f"missing_flag:{expr}")
+        elif check.startswith("local_worker_backend:"):
+            expected = check.split(":", 1)[1]
+            if effective_local_worker_backend() != expected:
+                reasons.append(f"missing_flag:ANGELLA_LOCAL_WORKER_BACKEND={expected}")
+        elif check == "mlx_health":
+            base_url = effective_mlx_base_url()
+            if not base_url:
+                reasons.append("missing_env:ANGELLA_MLX_BASE_URL")
+            elif not mlx_healthy(base_url):
+                reasons.append("mlx_healthcheck_failed")
         elif check == "apfel_health":
             base_url = os.environ.get("ANGELLA_APFEL_BASE_URL", "")
             if not base_url:
@@ -101,6 +178,13 @@ def selector_sort_key(selector: str, model: dict):
             model["stability_score"],
             model["priority"],
         )
+    if selector == "best_coding_frontier":
+        return (
+            model["tool_use_score"],
+            model["reasoning_score"],
+            model["latency_score"],
+            model["priority"],
+        )
     if selector == "best_reasoning_frontier_low_cost":
         return (
             model["reasoning_score"],
@@ -115,11 +199,11 @@ def selector_sort_key(selector: str, model: dict):
             model["stability_score"],
             model["priority"],
         )
-    if selector == "best_local_reasoning":
+    if selector == "best_local_fallback":
         return (
             model["reasoning_score"],
-            model["latency_score"],
             model["stability_score"],
+            model["cost_score"],
             model["priority"],
         )
     return (
@@ -131,8 +215,12 @@ def selector_sort_key(selector: str, model: dict):
 
 
 def selector_candidates(selector: str, models: list[dict], role: str) -> list[dict]:
-    if selector.startswith("best_reasoning_frontier"):
-        return [m for m in models if role in m["role_support"] and m["provider"] in {"google", "anthropic", "openai"}]
+    if selector.startswith("best_reasoning_frontier") or selector.startswith("best_coding_frontier"):
+        return [m for m in models if role in m["role_support"] and m["provider"] in FRONTIER_PROVIDERS]
+    if selector == "best_local_low_latency":
+        return [m for m in models if role in m["role_support"] and "low_latency" in m.get("flags", [])]
+    if selector == "best_local_fallback":
+        return [m for m in models if role in m["role_support"] and m.get("tier") == "local"]
     return [m for m in models if role in m["role_support"]]
 
 
@@ -155,6 +243,7 @@ def resolve_catalog(models: list[dict]) -> list[dict]:
     for model in models:
         enabled, reasons, provisionable = availability_for_model(model, tags)
         item = dict(model)
+        item["model"] = resolved_runtime_model(item)
         item["enabled"] = enabled
         item["disabled_reason"] = ",".join(reasons)
         item["provisionable"] = provisionable
@@ -173,15 +262,81 @@ def get_default_profile(profiles: list[dict]) -> dict:
     return profiles[0]
 
 
-def resolve_selection(resolved_models: list[dict], profiles: list[dict], profile_id: str | None, lead_override: str | None, planner_override: str | None, worker_override: str | None) -> dict:
+def _legacy_profile_error(profile_id: str) -> SystemExit:
+    replacement = LEGACY_PROFILE_MIGRATIONS.get(profile_id)
+    if replacement:
+        return SystemExit(
+            f"Legacy harness profile `{profile_id}` has been removed. Use `{replacement}` instead."
+        )
+    return SystemExit(f"Unknown harness profile: {profile_id}")
+
+
+def _frontier_reachable(resolved_models: list[dict], role: str) -> bool:
+    return any(
+        role in model["role_support"] and model["provider"] in FRONTIER_PROVIDERS and model["enabled"]
+        for model in resolved_models
+    )
+
+
+def _fallback_reason(profile: dict, resolved_models: list[dict]) -> str:
+    active: list[str] = []
+    if _bool_env("ANGELLA_LOCAL_CONTEXT_NEEDED"):
+        active.append("local_context_needed")
+    if _bool_env("ANGELLA_PRIVATE_MODE"):
+        active.append("private_mode")
+    if _bool_env("ANGELLA_FRONTIER_TOKEN_LIMITED"):
+        active.append("token_limited")
+    if _bool_env("ANGELLA_FRONTIER_NETWORK_BLOCKED"):
+        active.append("network_blocked")
+    frontier_reachable_env = os.environ.get("ANGELLA_FRONTIER_REACHABLE", "").strip().lower()
+    if frontier_reachable_env in {"0", "false", "no", "off"}:
+        active.append("frontier_unreachable")
+    elif not _frontier_reachable(resolved_models, "worker"):
+        active.append("frontier_unreachable")
+
+    for reason in profile.get("fallback_when_any", []):
+        if reason in active:
+            return reason
+    return ""
+
+
+def resolve_selection(
+    resolved_models: list[dict],
+    profiles: list[dict],
+    profile_id: str | None,
+    lead_override: str | None,
+    planner_override: str | None,
+    worker_override: str | None,
+) -> dict:
+    if profile_id in LEGACY_PROFILE_MIGRATIONS:
+        raise _legacy_profile_error(profile_id or "")
+
     profile = get_profile_map(profiles).get(profile_id) if profile_id else get_default_profile(profiles)
     if profile is None:
-        raise SystemExit(f"Unknown harness profile: {profile_id}")
+        raise _legacy_profile_error(profile_id or "")
 
     by_id = {model["id"]: model for model in resolved_models}
 
-    def select(role: str, selector: str, override: str | None) -> dict:
-        required_flags = profile.get("capability_flags", {}).get(f"{role}_required_flags", [])
+    def unavailable_message(selected: dict) -> str:
+        if selected["id"] == "mlx_gemma4_31b_it_4bit":
+            return (
+                f"Model {selected['id']} is unavailable: {selected['disabled_reason']}. "
+                "Check ANGELLA_LOCAL_WORKER_BACKEND=mlx and ANGELLA_MLX_BASE_URL."
+            )
+        if selected["id"] == "apfel_foundationmodel":
+            return (
+                f"Model {selected['id']} is unavailable: {selected['disabled_reason']}. "
+                "Check ANGELLA_APFEL_BASE_URL or migrate to ANGELLA_MLX_BASE_URL."
+            )
+        return f"Model {selected['id']} is unavailable: {selected['disabled_reason']}"
+
+    def select(role: str, selector: str, override: str | None, is_fallback: bool = False) -> dict:
+        flag_key = f"fallback_{role}_required_flags" if is_fallback else f"{role}_required_flags"
+        required_flags = profile.get("capability_flags", {}).get(flag_key, [])
+        if not required_flags and is_fallback:
+            # Fall back to standard required flags if no fallback-specific flags are set
+            required_flags = profile.get("capability_flags", {}).get(f"{role}_required_flags", [])
+
         if override:
             selected = by_id.get(override)
             if selected is None:
@@ -191,7 +346,7 @@ def resolve_selection(resolved_models: list[dict], profiles: list[dict], profile
             if not all(flag in selected.get("flags", []) for flag in required_flags):
                 raise SystemExit(f"Model {override} does not satisfy required flags for {role}")
             if not selected["enabled"]:
-                raise SystemExit(f"Model {override} is unavailable: {selected['disabled_reason']}")
+                raise SystemExit(unavailable_message(selected))
             return selected
 
         selected, _ = choose_model(selector, [model for model in resolved_models if model["enabled"]], role, required_flags)
@@ -201,7 +356,31 @@ def resolve_selection(resolved_models: list[dict], profiles: list[dict], profile
 
     lead = select("lead", profile["lead_selector"], lead_override)
     planner = select("planner", profile["planner_selector"], planner_override) if planner_override or profile.get("planner_selector") else lead
-    worker = select("worker", profile["worker_selector"], worker_override)
+
+    fallback_reason = ""
+    worker_selector = profile["worker_selector"]
+    is_fallback = False
+    if worker_override:
+        worker = select("worker", worker_selector, worker_override)
+    else:
+        fallback_reason = _fallback_reason(profile, resolved_models)
+        if fallback_reason and profile.get("fallback_worker_selector"):
+            worker_selector = profile["fallback_worker_selector"]
+            is_fallback = True
+        worker = select("worker", worker_selector, None, is_fallback=is_fallback)
+
+    worker_tier = profile.get("worker_tier_default", "frontier_primary")
+    if worker.get("tier") == "local":
+        if profile["id"] == "frontier_private_fallback":
+            worker_tier = "local_fallback"
+        elif profile["id"] == "local_lab":
+            worker_tier = "local_augment"
+        else:
+            worker_tier = "local_cache"
+
+    frontier_reachable = _frontier_reachable(resolved_models, "worker") and not _bool_env("ANGELLA_FRONTIER_NETWORK_BLOCKED")
+    local_cache_enabled = bool(profile.get("local_cache_enabled", False))
+    token_saver_enabled = bool(profile.get("token_saver_enabled", False))
 
     return {
         "profile": profile,
@@ -209,9 +388,18 @@ def resolve_selection(resolved_models: list[dict], profiles: list[dict], profile
         "planner": planner,
         "worker": worker,
         "capabilities": {
+            "mlx_enabled": worker["goose_provider"] == "angella_mlx_local",
             "apfel_enabled": worker["id"] == "apfel_foundationmodel",
             "mlx_preview_enabled": "preview" in worker.get("flags", []),
             "nvfp4_enabled": "preview" in worker.get("flags", []),
+        },
+        "routing": {
+            "execution_mode": profile.get("execution_mode", "frontier_primary"),
+            "worker_tier": worker_tier,
+            "fallback_reason": fallback_reason,
+            "frontier_reachable": frontier_reachable,
+            "local_cache_enabled": local_cache_enabled,
+            "token_saver_enabled": token_saver_enabled,
         },
     }
 
@@ -226,7 +414,7 @@ def print_list_models(resolved_models: list[dict]) -> None:
 
         print(
             f"{model['id']}: roles={','.join(model['role_support'])} "
-            f"provider={model['goose_provider']} model={model['model']} status={status}"
+            f"provider={model['goose_provider']} model={model['model']} tier={model.get('tier', 'unknown')} status={status}"
         )
 
 
@@ -236,7 +424,8 @@ def print_list_profiles(resolved_models: list[dict], profiles: list[dict]) -> No
             resolved = resolve_selection(resolved_models, profiles, profile["id"], None, None, None)
             print(
                 f"{profile['id']}: lead={resolved['lead']['id']} "
-                f"planner={resolved['planner']['id']} worker={resolved['worker']['id']}"
+                f"planner={resolved['planner']['id']} worker={resolved['worker']['id']} "
+                f"mode={resolved['routing']['execution_mode']} worker_tier={resolved['routing']['worker_tier']}"
             )
         except SystemExit as error:
             print(f"{profile['id']}: disabled ({error})")
@@ -252,6 +441,7 @@ def print_shell_resolution(resolution: dict) -> None:
     planner = resolution["planner"]
     worker = resolution["worker"]
     capabilities = resolution["capabilities"]
+    routing = resolution["routing"]
 
     values = {
         "ANGELLA_HARNESS_PROFILE_ID": profile["id"],
@@ -270,9 +460,19 @@ def print_shell_resolution(resolution: dict) -> None:
         "ANGELLA_WORKER_MODEL": worker["model"],
         "ANGELLA_WORKER_CONTEXT_LIMIT": str(worker["context_limit"]),
         "ANGELLA_WORKER_TEMPERATURE": str(worker["temperature_default"]),
+        "ANGELLA_LOCAL_WORKER_BACKEND": effective_local_worker_backend() or ("mlx" if capabilities["mlx_enabled"] else "ollama"),
+        "ANGELLA_MLX_BASE_URL": effective_mlx_base_url(),
+        "ANGELLA_MLX_MODEL": effective_mlx_model(worker["model"]) if capabilities["mlx_enabled"] else effective_mlx_model(""),
+        "ANGELLA_MLX_ENABLED": "true" if capabilities["mlx_enabled"] else "false",
         "ANGELLA_MLX_PREVIEW_ENABLED": "true" if capabilities["mlx_preview_enabled"] else "false",
         "ANGELLA_NVFP4_ENABLED": "true" if capabilities["nvfp4_enabled"] else "false",
         "ANGELLA_APFEL_ENABLED": "true" if capabilities["apfel_enabled"] else "false",
+        "ANGELLA_EXECUTION_MODE": routing["execution_mode"],
+        "ANGELLA_WORKER_TIER": routing["worker_tier"],
+        "ANGELLA_FALLBACK_REASON": routing["fallback_reason"],
+        "ANGELLA_FRONTIER_REACHABLE": "true" if routing["frontier_reachable"] else "false",
+        "ANGELLA_LOCAL_CACHE_ENABLED": "true" if routing["local_cache_enabled"] else "false",
+        "ANGELLA_TOKEN_SAVER_ENABLED": "true" if routing["token_saver_enabled"] else "false",
         "ANGELLA_NON_GOALS_JSON": json.dumps(profile.get("non_goals", []), ensure_ascii=False),
         "ANGELLA_MLX_POLICY_JSON": json.dumps(profile.get("mlx_policy", {}), ensure_ascii=False),
     }

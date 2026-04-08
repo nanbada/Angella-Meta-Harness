@@ -1,0 +1,22 @@
+{
+  "knowledge_policy": {
+    "indexed_paths": [
+      "knowledge",
+      "README.md",
+      "docs/arch-snapshot.md",
+      "docs/spec-contracts.md",
+      "docs/PARITY.md",
+      "plan.md"
+    ],
+    "canonical_entrypoints": [
+      "knowledge/index.md",
+      "knowledge/log.md",
+      "knowledge/sources/index.md"
+    ],
+    "search_provider": "builtin",
+    "default_max_results": 5,
+    "snippet_chars": 240,
+    "compaction_budget_chars": 600,
+    "log_tail_entries": 5
+  }
+}
