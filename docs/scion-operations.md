@@ -41,7 +41,7 @@ Angella의 Phase 7 Scion 기능은 실서비스 hub가 아니라 **file-backed c
    - 실제 수정 범위를 shared state에 claim
    - `mode=advisory`는 기존 MVP처럼 warning 기반 coordination
    - `strict=true` 또는 `mode=exclusive`는 authoritative claim file을 만들고 겹치면 실패
-   - `mode=takeover` + `takeover_from=<agent-id>`는 정확히 같은 claim path에 한해 ownership handoff를 수행
+   - `mode=takeover` + `takeover_from=<agent-id>`는 exact handoff 또는 broad parent claim으로부터 nested path handoff를 수행
 5. `scion_register_worktree`
    - 현재 agent가 작업 중인 worktree path / branch / clean 상태를 등록
    - `scion_inspect_state`와 peer query에 worktree metadata를 노출
@@ -70,9 +70,11 @@ Angella의 Phase 7 Scion 기능은 실서비스 hub가 아니라 **file-backed c
 
 ## Takeover Handoff
 
-- broad directory claim을 쪼개지 않은 상태에서 nested file takeover는 허용하지 않습니다.
-- `mode=takeover`는 같은 claim path에 대한 명시적 ownership handoff만 지원합니다.
-- takeover가 성공하면 이전 owner의 exact claim은 agent state와 authoritative claim file 양쪽에서 제거됩니다.
+- `mode=takeover`는 같은 claim path에 대한 exact handoff를 지원합니다.
+- broad parent claim과 nested child path 조합이면 parent claim record에 `exclusions`를 추가하는 방식으로 safe decomposition을 수행합니다.
+- nested takeover는 `takeover_from=<agent-id>`가 broad parent owner와 일치할 때만 허용됩니다.
+- nested child claim이 release 또는 stale prune으로 사라지면 parent claim의 exclusion은 자동으로 복구됩니다.
+- broader path가 더 좁은 child claim을 덮어쓰는 방향의 widening takeover는 허용하지 않습니다.
 
 ## Current Limits
 

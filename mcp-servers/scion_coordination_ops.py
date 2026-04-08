@@ -257,6 +257,10 @@ def _paths_overlap(candidate: str, claimed: str) -> bool:
     return candidate.startswith(f"{claimed}/") or claimed.startswith(f"{candidate}/")
 
 
+def _path_within(candidate: str, container: str) -> bool:
+    return candidate == container or candidate.startswith(f"{container}/")
+
+
 def _overlap_pairs(candidate_files: list[str], peer_files: list[str]) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -348,6 +352,37 @@ def _fresh_worktree_record(record: dict[str, Any]) -> bool:
     return expires > time.time()
 
 
+def _record_exclusions(record: dict[str, Any]) -> list[str]:
+    return _normalize_paths(record.get("exclusions", []))
+
+
+def _candidate_is_excluded(record: dict[str, Any], candidate: str) -> bool:
+    return any(_path_within(candidate, excluded) for excluded in _record_exclusions(record))
+
+
+def _record_conflict_pairs(record: dict[str, Any], candidate_files: list[str]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    claimed_path = _normalize_path(str(record.get("claimed_path", "")))
+    if not claimed_path:
+        return pairs
+    for candidate in _normalize_paths(candidate_files):
+        if not _paths_overlap(candidate, claimed_path):
+            continue
+        if _candidate_is_excluded(record, candidate):
+            continue
+        pairs.append((candidate, claimed_path))
+    return pairs
+
+
+def _advisory_only_claims(peer: dict[str, Any], owner_records: list[dict[str, Any]]) -> list[str]:
+    residual: list[str] = []
+    for claimed in _normalize_paths(peer.get("claimed_files", [])):
+        if any(_record_conflict_pairs(record, [claimed]) for record in owner_records):
+            continue
+        residual.append(claimed)
+    return residual
+
+
 def _claim_conflicts_for_files(self_id: str, candidate_files: list[str]) -> list[dict[str, Any]]:
     conflicts: list[dict[str, Any]] = []
     for record in _load_claim_records():
@@ -356,7 +391,7 @@ def _claim_conflicts_for_files(self_id: str, candidate_files: list[str]) -> list
         owner = str(record.get("agent_id", "")).strip()
         if not owner or owner == self_id:
             continue
-        pairs = _overlap_pairs(candidate_files, [record.get("claimed_path", "")])
+        pairs = _record_conflict_pairs(record, candidate_files)
         if not pairs:
             continue
         conflicts.append(
@@ -368,6 +403,9 @@ def _claim_conflicts_for_files(self_id: str, candidate_files: list[str]) -> list
                 "intent": record.get("intent", ""),
                 "message": record.get("message", ""),
                 "worktree": record.get("worktree", {}),
+                "exclusions": _record_exclusions(record),
+                "decomposed_from_agent": str(record.get("decomposed_from_agent", "")).strip(),
+                "decomposed_from_claimed_path": _normalize_path(str(record.get("decomposed_from_claimed_path", ""))),
                 "_path": record["_path"],
                 "_record": record,
             }
@@ -411,6 +449,35 @@ def _drop_claimed_files_from_agent(agent_id: str, claimed_paths: list[str]) -> N
     )
 
 
+def _restore_parent_claim_coverage(record: dict[str, Any]) -> None:
+    parent_agent = str(record.get("decomposed_from_agent", "")).strip()
+    parent_path = _normalize_path(str(record.get("decomposed_from_claimed_path", "")))
+    claimed_path = _normalize_path(str(record.get("claimed_path", "")))
+    if not parent_agent or not parent_path or not claimed_path:
+        return
+
+    parent_record_path = _claim_record_path(parent_path)
+    if not parent_record_path.exists():
+        return
+    try:
+        parent_record = _read_json(parent_record_path)
+    except Exception:
+        return
+    if str(parent_record.get("agent_id", "")).strip() != parent_agent:
+        return
+
+    exclusions = [item for item in _record_exclusions(parent_record) if item != claimed_path]
+    parent_record["exclusions"] = exclusions
+    _write_json(parent_record_path, parent_record)
+
+
+def _record_for_write(record: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(record)
+    payload.pop("_path", None)
+    payload.pop("_record", None)
+    return payload
+
+
 def _claim_payload(
     agent_id: str,
     claimed_path: str,
@@ -421,6 +488,9 @@ def _claim_payload(
     metadata: dict[str, Any],
     worktree: dict[str, Any],
     ttl_seconds: int,
+    exclusions: list[str] | None = None,
+    decomposed_from_agent: str = "",
+    decomposed_from_claimed_path: str = "",
 ) -> dict[str, Any]:
     now = time.time()
     return {
@@ -431,6 +501,9 @@ def _claim_payload(
         "message": message,
         "metadata": metadata,
         "worktree": worktree,
+        "exclusions": _normalize_paths(exclusions or []),
+        "decomposed_from_agent": decomposed_from_agent,
+        "decomposed_from_claimed_path": _normalize_path(decomposed_from_claimed_path),
         "claimed_at": _iso_now(),
         "claimed_at_epoch": now,
         "expires_at_epoch": now + max(30, ttl_seconds),
@@ -468,6 +541,14 @@ def _claim_conflict_text(conflicts: list[dict[str, Any]]) -> str:
     for conflict in conflicts:
         rendered.append(f"{conflict['agent_id']} -> {_format_conflict_pairs(conflict['pairs'])}")
     return "; ".join(rendered)
+
+
+def _format_claim_scope(record: dict[str, Any]) -> str:
+    claimed_path = _normalize_path(str(record.get("claimed_path", "unknown")))
+    exclusions = _record_exclusions(record)
+    if not exclusions:
+        return claimed_path
+    return f"{claimed_path} (excluding: {', '.join(exclusions)})"
 
 
 def _worktree_conflict_text(records: list[dict[str, Any]]) -> str:
@@ -678,6 +759,7 @@ def _authoritative_claim_files(
     created_paths: list[Path] = []
     replaced_records: list[tuple[Path, dict[str, Any]]] = []
     took_over_from: list[dict[str, Any]] = []
+    nested_takeovers: list[dict[str, Any]] = []
     conflicts = _claim_conflicts_for_files(agent_id, files)
 
     if claim_mode == "exclusive" and conflicts:
@@ -689,9 +771,13 @@ def _authoritative_claim_files(
         for conflict in conflicts:
             if conflict["agent_id"] != takeover_from:
                 raise RuntimeError(f"Cannot take over claim owned by {conflict['agent_id']}; expected {takeover_from}.")
-            if any(candidate != conflict["claimed_path"] for candidate, _claimed in conflict["pairs"]):
+            for candidate, _claimed in conflict["pairs"]:
+                if candidate == conflict["claimed_path"]:
+                    continue
+                if _path_within(candidate, conflict["claimed_path"]):
+                    continue
                 raise RuntimeError(
-                    "Takeover only supports exact claim handoff. Split broad claims before taking over nested files."
+                    "Takeover only supports exact claim handoff or nested takeover from a broader parent claim."
                 )
 
     try:
@@ -699,6 +785,23 @@ def _authoritative_claim_files(
             claim_path = _claim_record_path(claimed_path)
             current_record = _read_json(claim_path) if claim_path.exists() else {}
             current_owner = str(current_record.get("agent_id", "")).strip()
+            decomposed_from_agent = ""
+            decomposed_from_claimed_path = ""
+            matching_conflicts = [
+                conflict
+                for conflict in conflicts
+                if any(candidate == claimed_path for candidate, _claimed in conflict["pairs"])
+            ]
+            nested_parent_conflict = next(
+                (
+                    conflict
+                    for conflict in matching_conflicts
+                    if conflict["agent_id"] == takeover_from
+                    and conflict["claimed_path"] != claimed_path
+                    and _path_within(claimed_path, conflict["claimed_path"])
+                ),
+                None,
+            )
 
             payload = _claim_payload(
                 agent_id,
@@ -709,7 +812,40 @@ def _authoritative_claim_files(
                 metadata=metadata,
                 worktree=worktree,
                 ttl_seconds=ttl_seconds,
+                decomposed_from_agent=str(current_record.get("decomposed_from_agent", "")).strip(),
+                decomposed_from_claimed_path=_normalize_path(str(current_record.get("decomposed_from_claimed_path", ""))),
             )
+
+            if claim_mode == "takeover" and nested_parent_conflict is not None:
+                parent_record = _record_for_write(nested_parent_conflict["_record"])
+                parent_path = nested_parent_conflict["_path"]
+                updated_exclusions = _record_exclusions(parent_record)
+                if claimed_path not in updated_exclusions:
+                    updated_exclusions.append(claimed_path)
+                parent_record["exclusions"] = _normalize_paths(updated_exclusions)
+                replaced_records.append((parent_path, _record_for_write(nested_parent_conflict["_record"])))
+                _write_json(parent_path, parent_record)
+                nested_takeovers.append(
+                    {
+                        "agent_id": takeover_from,
+                        "claimed_path": nested_parent_conflict["claimed_path"],
+                        "candidate_path": claimed_path,
+                    }
+                )
+                decomposed_from_agent = takeover_from
+                decomposed_from_claimed_path = nested_parent_conflict["claimed_path"]
+                payload = _claim_payload(
+                    agent_id,
+                    claimed_path,
+                    claim_mode=claim_mode,
+                    intent=intent,
+                    message=message,
+                    metadata=metadata,
+                    worktree=worktree,
+                    ttl_seconds=ttl_seconds,
+                    decomposed_from_agent=decomposed_from_agent,
+                    decomposed_from_claimed_path=decomposed_from_claimed_path,
+                )
 
             if current_record and _fresh_claim_record(current_record) and current_owner not in {"", agent_id}:
                 if claim_mode != "takeover" or current_owner != takeover_from or current_record.get("claimed_path") != claimed_path:
@@ -740,7 +876,7 @@ def _authoritative_claim_files(
 
         for previous in took_over_from:
             _drop_claimed_files_from_agent(str(previous.get("agent_id", "")), [str(previous.get("claimed_path", ""))])
-        return took_over_from
+        return took_over_from + nested_takeovers
     except Exception:
         for path in created_paths:
             path.unlink(missing_ok=True)
@@ -753,16 +889,31 @@ def _summary_for_query(peers: list[dict[str, Any]], candidate_files: list[str]) 
     if not peers:
         return f"No active Scion peers registered in {_shared_dir()}."
 
+    authoritative_by_owner: dict[str, list[dict[str, Any]]] = {}
+    for record in _load_claim_records():
+        if not _fresh_claim_record(record):
+            continue
+        owner = str(record.get("agent_id", "")).strip()
+        if not owner:
+            continue
+        authoritative_by_owner.setdefault(owner, []).append(record)
+
     overlaps: list[str] = []
     peer_lines: list[str] = []
     for peer in peers:
-        claimed = peer.get("claimed_files", [])
         status = peer.get("status", "unknown")
         message = peer.get("message", "")
         intent = peer.get("intent", "")
         peer_line = f"{peer['agent_id']} status={status}"
-        if claimed:
-            peer_line += f" claims={','.join(claimed)}"
+        owner_records = authoritative_by_owner.get(peer["agent_id"], [])
+        advisory_claims = _advisory_only_claims(peer, owner_records)
+        if owner_records:
+            scopes = [_format_claim_scope(record) for record in owner_records]
+            if advisory_claims:
+                scopes.extend(advisory_claims)
+            peer_line += " claims=" + ",".join(scopes)
+        elif advisory_claims:
+            peer_line += f" claims={','.join(advisory_claims)}"
         if intent:
             peer_line += f" intent={intent}"
         if message:
@@ -772,9 +923,18 @@ def _summary_for_query(peers: list[dict[str, Any]], candidate_files: list[str]) 
             peer_line += f" worktree={worktree}"
         peer_lines.append(peer_line)
 
-        overlap = _overlap_pairs(candidate_files, claimed)
-        if overlap:
-            overlaps.append(f"{peer['agent_id']} -> {_format_conflict_pairs(overlap)}")
+        if owner_records:
+            owner_pairs: list[tuple[str, str]] = []
+            for record in owner_records:
+                owner_pairs.extend(_record_conflict_pairs(record, candidate_files))
+            advisory_pairs = _overlap_pairs(candidate_files, advisory_claims)
+            combined_pairs = owner_pairs + [pair for pair in advisory_pairs if pair not in owner_pairs]
+            if combined_pairs:
+                overlaps.append(f"{peer['agent_id']} -> {_format_conflict_pairs(combined_pairs)}")
+        else:
+            overlap = _overlap_pairs(candidate_files, advisory_claims)
+            if overlap:
+                overlaps.append(f"{peer['agent_id']} -> {_format_conflict_pairs(overlap)}")
 
     if overlaps:
         return "Conflicts detected with active peers:\n" + "\n".join(overlaps) + "\n\nActive peers:\n" + "\n".join(peer_lines)
@@ -783,8 +943,25 @@ def _summary_for_query(peers: list[dict[str, Any]], candidate_files: list[str]) 
 
 def _conflicts_for_files(self_id: str, candidate_files: list[str]) -> list[dict[str, Any]]:
     conflicts: list[dict[str, Any]] = []
+    authoritative_by_owner: dict[str, list[dict[str, Any]]] = {}
+    for record in _load_claim_records():
+        if not _fresh_claim_record(record):
+            continue
+        owner = str(record.get("agent_id", "")).strip()
+        if not owner or owner == self_id:
+            continue
+        authoritative_by_owner.setdefault(owner, []).append(record)
     for peer in _active_peers(self_id):
-        overlap = _overlap_pairs(candidate_files, peer.get("claimed_files", []))
+        owner_records = authoritative_by_owner.get(peer["agent_id"], [])
+        advisory_claims = _advisory_only_claims(peer, owner_records)
+        if owner_records:
+            overlap: list[tuple[str, str]] = []
+            for record in owner_records:
+                overlap.extend(_record_conflict_pairs(record, candidate_files))
+            advisory_pairs = _overlap_pairs(candidate_files, advisory_claims)
+            overlap.extend(pair for pair in advisory_pairs if pair not in overlap)
+        else:
+            overlap = _overlap_pairs(candidate_files, advisory_claims)
         if overlap:
             conflicts.append(
                 {
@@ -842,9 +1019,13 @@ def _inspect_state_text(*, include_events: bool = True, event_limit: int = 10) -
         lines.append("Authoritative claims:")
         for record in claim_records:
             line = (
-                f"- {record.get('claimed_path', 'unknown')} owner={record.get('agent_id', 'unknown')} "
+                f"- {_format_claim_scope(record)} owner={record.get('agent_id', 'unknown')} "
                 f"mode={record.get('claim_mode', 'exclusive')}"
             )
+            decomposed_from_agent = str(record.get("decomposed_from_agent", "")).strip()
+            decomposed_from_path = _normalize_path(str(record.get("decomposed_from_claimed_path", "")))
+            if decomposed_from_agent and decomposed_from_path:
+                line += f" from={decomposed_from_agent}:{decomposed_from_path}"
             worktree = _format_worktree(record.get("worktree", {}))
             if worktree:
                 line += f" worktree={worktree}"
@@ -937,6 +1118,7 @@ def _prune_stale(*, event_retention_seconds: int = 86400) -> dict[str, Any]:
                     elif claimed_path not in _normalize_paths(owner_state.get("claimed_files", [])):
                         remove = True
         if remove:
+            _restore_parent_claim_coverage(record)
             path.unlink(missing_ok=True)
             stale_claims.append(str(path.relative_to(_claims_dir())))
 
@@ -1209,7 +1391,11 @@ def handle_request(request: dict) -> dict:
             text += f"\nWarning: overlapping claims with {conflict_text}"
         if authoritative_handoffs:
             handoff_text = ", ".join(sorted({str(record.get("agent_id", "")) for record in authoritative_handoffs}))
-            text += f"\nTook over exact claims from: {handoff_text}"
+            if any("candidate_path" in record for record in authoritative_handoffs):
+                text += f"\nTook over claims from: {handoff_text}"
+                text += "\nNested takeover decomposed broader parent claims via exclusions."
+            else:
+                text += f"\nTook over exact claims from: {handoff_text}"
         return {"content": [{"type": "text", "text": text}]}
 
     if tool == "scion_release_claims":
@@ -1244,6 +1430,7 @@ def handle_request(request: dict) -> dict:
                 continue
             claim_path = record.get("_path")
             if isinstance(claim_path, Path):
+                _restore_parent_claim_coverage(record)
                 claim_path.unlink(missing_ok=True)
         _record_event(agent_id, "release", {"released_files": released, "remaining_files": remaining})
         text = f"Released {len(released)} claim(s) for {agent_id}."
