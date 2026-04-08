@@ -2,11 +2,11 @@
   "knowledge_policy": {
     "indexed_paths": [
       "knowledge",
-      "docs/current-harness-status.md",
-      "docs/setup-installer-architecture.md",
-      "docs/hybrid-harness.md",
-      "docs/promotion-content-quality.md",
-      "PARITY.md"
+      "README.md",
+      "docs/arch-snapshot.md",
+      "docs/spec-contracts.md",
+      "docs/PARITY.md",
+      "plan.md"
     ],
     "canonical_entrypoints": [
       "knowledge/index.md",

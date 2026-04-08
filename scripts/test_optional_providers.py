@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Regression checks for optional qmd integrations."""
+"""Regression checks for shared knowledge path overrides."""
 
 from __future__ import annotations
 
 import os
-import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -13,48 +12,70 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR / "mcp-servers"))
 
-from meta_loop_ops import search_harness_knowledge  # noqa: E402
+import llmwiki_compiler_ops  # noqa: E402
 
 
 def main() -> int:
     with tempfile.TemporaryDirectory() as tmp_root:
-        root = Path(tmp_root)
-        repo = root / "repo"
-        repo.mkdir()
-        (repo / "knowledge").mkdir()
-        (repo / "knowledge" / "index.md").write_text("# Index\n\nAuthentication and setup-check notes\n", encoding="utf-8")
-        (repo / "knowledge" / "log.md").write_text("# Log\n", encoding="utf-8")
-        (repo / "knowledge" / "schema.md").write_text("# Schema\n", encoding="utf-8")
-        (repo / "config").mkdir()
-        (repo / "config" / "knowledge-policy.yaml").write_text(
-            '{"knowledge_policy":{"indexed_paths":["knowledge"],"canonical_entrypoints":["knowledge/index.md","knowledge/log.md"],"search_provider":"builtin","snippet_chars":240}}',
-            encoding="utf-8",
-        )
-        (repo / "PARITY.md").write_text("# Parity\n", encoding="utf-8")
+        knowledge_dir = Path(tmp_root) / "shared-knowledge"
+        tmp_project_root = Path(tmp_root) / "project-root"
+        tmp_project_root.mkdir(parents=True, exist_ok=True)
+        repo_local_knowledge = tmp_project_root / "knowledge"
+        original_env = os.environ.get("ANGELLA_KNOWLEDGE_DIR")
+        original_project_root = llmwiki_compiler_ops.PROJECT_ROOT
+        original_run = llmwiki_compiler_ops.subprocess.run
+        captured: dict[str, object] = {}
 
-        fallback = search_harness_knowledge("authentication", provider="qmd", repo_root=repo)
-        assert fallback["success"] is True
-        assert fallback["provider"] == "builtin"
-        assert fallback["fallback_reason"] == "qmd_not_installed"
+        def fake_run(cmd, cwd, capture_output, text, env):
+            captured["cmd"] = cmd
+            captured["cwd"] = cwd
+            captured["env_knowledge_dir"] = env.get("ANGELLA_KNOWLEDGE_DIR")
 
-        fake_bin = root / "bin"
-        fake_bin.mkdir()
-        qmd = fake_bin / "qmd"
-        qmd.write_text(
-            "#!/usr/bin/env bash\n"
-            "echo '[{\"path\":\"knowledge/index.md\",\"title\":\"Index\",\"category\":\"knowledge\",\"snippet\":\"authentication flow\"}]'\n",
-            encoding="utf-8",
-        )
-        qmd.chmod(qmd.stat().st_mode | stat.S_IEXEC)
-        original_path = os.environ.get("PATH", "")
-        os.environ["PATH"] = f"{fake_bin}:{original_path}"
+            class Result:
+                returncode = 0
+                stdout = "ok"
+                stderr = ""
+
+            return Result()
+
+        llmwiki_compiler_ops.PROJECT_ROOT = tmp_project_root
+        llmwiki_compiler_ops.subprocess.run = fake_run
         try:
-            qmd_result = search_harness_knowledge("authentication", provider="qmd", repo_root=repo)
-            assert qmd_result["provider"] == "qmd"
-            assert qmd_result["results"][0]["relpath"] == "knowledge/index.md"
+            os.environ.pop("ANGELLA_KNOWLEDGE_DIR", None)
+            default_output = llmwiki_compiler_ops.run_npx_llmwiki(["query", "repo local knowledge"])
+            assert default_output == "ok"
+            assert Path(str(captured["cwd"])).resolve() == repo_local_knowledge.resolve()
+            assert captured["env_knowledge_dir"] is None
 
+            os.environ["ANGELLA_KNOWLEDGE_DIR"] = str(knowledge_dir)
+            output = llmwiki_compiler_ops.run_npx_llmwiki(["query", "shared knowledge"])
+            assert output == "ok"
+            assert captured["cmd"] == ["npx", "--yes", "llm-wiki-compiler", "query", "shared knowledge"]
+            assert Path(str(captured["cwd"])).resolve() == knowledge_dir.resolve()
+            assert captured["env_knowledge_dir"] == str(knowledge_dir)
+
+            response = llmwiki_compiler_ops.handle_request(
+                {
+                    "type": "call_tool",
+                    "name": "llmwiki_save_note",
+                    "arguments": {
+                        "title": "Shared Knowledge Note",
+                        "content": "Angella shared wiki override works.",
+                    },
+                }
+            )
         finally:
-            os.environ["PATH"] = original_path
+            llmwiki_compiler_ops.PROJECT_ROOT = original_project_root
+            llmwiki_compiler_ops.subprocess.run = original_run
+            if original_env is None:
+                os.environ.pop("ANGELLA_KNOWLEDGE_DIR", None)
+            else:
+                os.environ["ANGELLA_KNOWLEDGE_DIR"] = original_env
+
+        saved_note = knowledge_dir / "sources" / "Shared_Knowledge_Note.md"
+        assert saved_note.is_file()
+        assert "shared wiki override works" in saved_note.read_text(encoding="utf-8")
+        assert "Successfully saved note" in response["content"][0]["text"]
 
     print("optional provider tests passed")
     return 0

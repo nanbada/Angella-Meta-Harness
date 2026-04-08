@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate PARITY.md against the canonical lane scenario map and parity state."""
+"""Validate docs/PARITY.md against the canonical lane scenario map and parity state."""
 
 from __future__ import annotations
 
@@ -8,15 +8,10 @@ import datetime as dt
 import json
 import os
 import re
-import shutil
-import sys
 from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT_DIR / "mcp-servers"))
-
-from meta_loop_ops import search_harness_knowledge  # noqa: E402
 
 
 def _load_json(path: Path) -> dict:
@@ -44,13 +39,17 @@ def _lane_section(parity_text: str, lane_id: int, title: str) -> str:
     return match.group(0) if match else ""
 
 
-def _recovery_hint(repo_root: Path, lane: dict, errors: list[str]) -> str:
-    query = f"{lane['title']} {' '.join(errors[:2])}".strip()
-    search = search_harness_knowledge(query, limit=3, repo_root=repo_root)
-    if search.get("results"):
-        pages = ", ".join(item["relpath"] for item in search["results"][:3])
-        return f"Review related knowledge first: {pages}"
-    return "Review PARITY.md, the scenario map, and the referenced evidence paths."
+def _repo_root_for_parity_file(parity_file: Path) -> Path:
+    if parity_file.parent.name == "docs":
+        return parity_file.parent.parent
+    return parity_file.parent
+
+
+def _recovery_hint(lane: dict) -> str:
+    return (
+        "Review docs/PARITY.md, scripts/harness_parity_scenarios.json, "
+        f"and the evidence paths for lane {lane['id']}."
+    )
 
 
 def _close_parity_failure_if_present(control_plane_root: Path, lane_id: int) -> None:
@@ -83,14 +82,14 @@ def _write_parity_failure(control_plane_root: Path, lane_id: int, lane: dict, er
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--parity-file", default=str(ROOT_DIR / "PARITY.md"))
+    parser.add_argument("--parity-file", default=str(ROOT_DIR / "docs" / "PARITY.md"))
     parser.add_argument("--scenario-file", default=str(ROOT_DIR / "scripts" / "harness_parity_scenarios.json"))
     parser.add_argument("--state-file", default="")
     args = parser.parse_args()
 
     parity_file = Path(args.parity_file).resolve()
     scenario_file = Path(args.scenario_file).resolve()
-    repo_root = parity_file.parent
+    repo_root = _repo_root_for_parity_file(parity_file)
     control_plane_root = _control_plane_root()
     state_file = Path(args.state_file).resolve() if args.state_file else control_plane_root / "parity-state.json"
 
@@ -106,7 +105,7 @@ def main() -> int:
     errors: list[str] = []
     lane_states: list[dict[str, object]] = []
     if "scripts/run_harness_parity_diff.py" not in parity_text:
-        errors.append("PARITY.md is missing the canonical diff-runner reference.")
+        errors.append("docs/PARITY.md is missing the canonical diff-runner reference.")
     scenario_lane_ids = {int(lane["id"]) for lane in scenarios}
     if existing_lane_ids and existing_lane_ids != scenario_lane_ids:
         errors.append("parity-state.json lane IDs do not match the scenario map.")
@@ -132,7 +131,7 @@ def main() -> int:
         if previous and str(previous.get("title", "")) != title:
             lane_errors.append(f"Lane {lane_id} title mismatch with parity-state.json")
 
-        hint = _recovery_hint(repo_root, lane, lane_errors) if lane_errors else ""
+        hint = _recovery_hint(lane) if lane_errors else ""
         lane_state = {
             "lane_id": lane_id,
             "title": title,
