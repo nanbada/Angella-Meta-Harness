@@ -126,7 +126,7 @@ def _truncate_smart(text: str, budget: int) -> str:
     return f"{text[:head].rstrip()}\n\n[... Truncated to fit token budget ...]\n\n{text[-tail:].lstrip()}"
 
 
-def compact_output(kind: str, text: str, budget: int = 1000) -> dict[str, Any]:
+def compact_output(kind: str, text: str, budget_chars: int = 1000) -> dict[str, Any]:
     raw = text or ""
     lines = [_strip_ansi(l) for l in raw.splitlines() if not _is_noise(l)]
     
@@ -139,7 +139,7 @@ def compact_output(kind: str, text: str, budget: int = 1000) -> dict[str, Any]:
     else:
         compacted = "\n".join(_dedupe_lines(lines))
 
-    compacted = _truncate_smart(compacted, budget).strip()
+    compacted = _truncate_smart(compacted, budget_chars).strip()
     
     raw_len, comp_len = len(raw), len(compacted)
     ratio = round(comp_len / max(1, raw_len), 4)
@@ -147,6 +147,7 @@ def compact_output(kind: str, text: str, budget: int = 1000) -> dict[str, Any]:
     
     return {
         "text": compacted,
+        "estimated_tokens_saved": tokens,
         "metrics": {"raw": raw_len, "compact": comp_len, "ratio": ratio, "saved_tokens": tokens}
     }
 

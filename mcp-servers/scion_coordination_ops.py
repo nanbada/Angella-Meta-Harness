@@ -169,6 +169,10 @@ def _paths_overlap(p1: str, p2: str) -> bool:
     return p1 == p2 or p1.startswith(f"{p2}/") or p2.startswith(f"{p1}/")
 
 
+def _path_within(candidate: str, container: str) -> bool:
+    return candidate == container or candidate.startswith(f"{container}/")
+
+
 # --- File-Backed Provider Implementation ---
 
 class FileScionProvider(ScionProvider):
@@ -236,14 +240,53 @@ class FileScionProvider(ScionProvider):
     def claim_files(self, agent_id: str, files: list[str], mode: str, intent: str, message: str, ttl_seconds: int | None, takeover_from: str, metadata: dict[str, Any]) -> dict[str, Any]:
         normalized = _normalize_paths(files)
         overlap_found = False
+        took_over_from = set()
+        nested_takeover_count = 0
+        
+        # Load all existing claims to find parent/nested conflicts
+        existing_claim_records = []
+        for p in self.claims_dir.rglob("*.json"):
+            rec = self._read_json(p)
+            if rec and rec.get("expires_at_epoch", 0) > time.time():
+                rec["_path"] = p
+                existing_claim_records.append(rec)
+
+        metadata_for_new_claims = {}
+
         for f in normalized:
-            path = self._claim_record_path(f)
-            if path.exists():
-                existing = self._read_json(path)
-                if existing.get("agent_id") != agent_id and existing.get("expires_at_epoch", 0) > time.time():
-                    if mode == "exclusive":
-                        raise RuntimeError(f"Conflicting Scion claims detected: {existing.get('agent_id')} -> {f}")
-                    elif mode != "takeover" or existing.get("agent_id") != takeover_from:
+            matching_conflicts = [r for r in existing_claim_records if r.get("agent_id") != agent_id and _paths_overlap(f, r.get("claimed_path", ""))]
+            
+            for conflict in matching_conflicts:
+                owner = conflict.get("agent_id")
+                claimed = conflict.get("claimed_path", "")
+                
+                if mode == "exclusive":
+                    if f not in conflict.get("exclusions", []):
+                        raise RuntimeError(f"Conflicting Scion claims detected: {owner} -> {f}")
+                elif mode == "takeover" and owner == takeover_from:
+                    if f == claimed:
+                        took_over_from.add(owner)
+                        owner_state = self._load_agent_state(owner)
+                        owner_claims = owner_state.get("claimed_files", [])
+                        if f in owner_claims:
+                            owner_claims.remove(f)
+                            self._save_agent_state(owner, owner_state)
+                    elif _path_within(f, claimed):
+                        took_over_from.add(owner)
+                        nested_takeover_count += 1
+                        exclusions = conflict.get("exclusions", [])
+                        if f not in exclusions:
+                            exclusions.append(f)
+                            conflict["exclusions"] = exclusions
+                            self._write_json(conflict["_path"], {k: v for k, v in conflict.items() if not k.startswith("_")})
+                        
+                        # Remember parent info for new claim
+                        metadata_for_new_claims[f] = {
+                            "decomposed_from_agent": owner,
+                            "decomposed_from_claimed_path": claimed
+                        }
+                else:
+                    if f not in conflict.get("exclusions", []):
                         overlap_found = True
 
         state = self._load_agent_state(agent_id)
@@ -254,16 +297,26 @@ class FileScionProvider(ScionProvider):
 
         now = time.time()
         ttl = ttl_seconds or _default_ttl_seconds()
-        for f in normalized:
-            self._write_json(self._claim_record_path(f), {
-                "agent_id": agent_id, "claimed_path": f, "mode": mode, "expires_at_epoch": now + ttl
-            })
+        if mode in {"exclusive", "takeover"}:
+            for f in normalized:
+                payload = {
+                    "agent_id": agent_id, "claimed_path": f, "mode": mode, "expires_at_epoch": now + ttl, "exclusions": []
+                }
+                if f in metadata_for_new_claims:
+                    payload.update(metadata_for_new_claims[f])
+                self._write_json(self._claim_record_path(f), payload)
         
         text = f"Claimed {len(normalized)} file(s) for {agent_id}: {', '.join(normalized)}"
         if mode != "advisory":
             text += f"\nClaim mode: {mode}"
         if overlap_found:
             text += f"\nWarning: overlapping claims detected with active peers."
+        if took_over_from:
+            if nested_takeover_count > 0:
+                text += f"\nTook over claims from: {', '.join(sorted(took_over_from))}"
+                text += "\nNested takeover decomposed broader parent claims via exclusions."
+            else:
+                text += f"\nTook over exact claims from: {', '.join(sorted(took_over_from))}"
         return {"content": [{"type": "text", "text": text}]}
 
     def release_claims(self, agent_id: str, files: list[str], note: str, ttl_seconds: int | None) -> dict[str, Any]:
@@ -281,6 +334,19 @@ class FileScionProvider(ScionProvider):
             if path.exists():
                 existing = self._read_json(path)
                 if existing.get("agent_id") == agent_id:
+                    # Restore parent coverage if nested takeover
+                    parent_agent = existing.get("decomposed_from_agent")
+                    parent_path = existing.get("decomposed_from_claimed_path")
+                    if parent_agent and parent_path:
+                        parent_record_path = self._claim_record_path(parent_path)
+                        if parent_record_path.exists():
+                            parent_record = self._read_json(parent_record_path)
+                            if parent_record.get("agent_id") == parent_agent:
+                                exclusions = parent_record.get("exclusions", [])
+                                if f in exclusions:
+                                    exclusions.remove(f)
+                                    parent_record["exclusions"] = exclusions
+                                    self._write_json(parent_record_path, parent_record)
                     path.unlink()
         return {"content": [{"type": "text", "text": f"Released {len(to_release)} claim(s) for {agent_id}."}]}
 
@@ -295,7 +361,21 @@ class FileScionProvider(ScionProvider):
     def register_worktree(self, agent_id: str, repo_root: Path, worktree: dict[str, Any], ttl_seconds: int | None, status: str | None, intent: str | None, message: str | None) -> dict[str, Any]:
         branch = worktree.get("branch")
         if not branch: raise ValueError("Worktree must have a branch.")
-        self._write_json(self._worktree_record_path(branch), {**worktree, "agent_id": agent_id})
+        
+        # Check for worktree conflicts
+        path_raw = worktree.get("path")
+        if path_raw:
+            worktree_path = Path(path_raw).expanduser().resolve()
+            for p in self.worktrees_dir.rglob("*.json"):
+                rec = self._read_json(p)
+                if rec and rec.get("expires_at_epoch", 0) > time.time():
+                    if rec.get("agent_id") != agent_id:
+                        if rec.get("branch") == branch or Path(rec.get("path", "")).expanduser().resolve() == worktree_path:
+                            raise RuntimeError(f"Conflicting Scion worktree reservations detected: {rec.get('agent_id')} -> branch={rec.get('branch')} path={rec.get('path')}")
+
+        now = time.time()
+        ttl = ttl_seconds or _default_ttl_seconds()
+        self._write_json(self._worktree_record_path(branch), {**worktree, "agent_id": agent_id, "expires_at_epoch": now + ttl})
         
         state = self._load_agent_state(agent_id)
         state["worktree"] = worktree
@@ -308,11 +388,21 @@ class FileScionProvider(ScionProvider):
             status = _run_git(repo_root, ["status", "--porcelain"])
             if status: raise RuntimeError("Repo root is dirty.")
         
+        # Check for conflicts BEFORE git operations
+        for p in self.worktrees_dir.rglob("*.json"):
+            rec = self._read_json(p)
+            if rec and rec.get("expires_at_epoch", 0) > time.time():
+                if rec.get("agent_id") != agent_id:
+                    if rec.get("branch") == branch or Path(rec.get("path", "")).expanduser().resolve() == worktree_path.resolve():
+                        raise RuntimeError(f"Conflicting Scion worktree reservations detected: {rec.get('agent_id')} -> branch={rec.get('branch')} path={rec.get('path')}")
+
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
         _run_git(repo_root, ["worktree", "add", "-b", branch, str(worktree_path), base_branch])
         
         worktree = {"path": str(worktree_path), "branch": branch, "base_branch": base_branch}
-        return self.register_worktree(agent_id, repo_root, worktree, ttl_seconds, "planning", None, None)
+        # Call register_worktree but return a custom message
+        self.register_worktree(agent_id, repo_root, worktree, ttl_seconds, "planning", None, None)
+        return {"content": [{"type": "text", "text": f"Prepared worktree for {agent_id}: branch={branch} base={base_branch} path={worktree_path}"}]}
 
     def remove_worktree(self, agent_id: str, repo_root: Path, branch: str, worktree_path: Path, force: bool, ttl_seconds: int | None) -> dict[str, Any]:
         args = ["worktree", "remove"]
@@ -326,7 +416,7 @@ class FileScionProvider(ScionProvider):
         state = self._load_agent_state(agent_id)
         state["worktree"] = {}
         self._save_agent_state(agent_id, state, ttl_seconds)
-        return {"content": [{"type": "text", "text": f"Removed worktree for {agent_id}: branch={branch}"}]}
+        return {"content": [{"type": "text", "text": f"Removed worktree for {agent_id}: branch={branch} path={worktree_path}"}]}
 
     def inspect_state(self, include_events: bool, event_limit: int) -> dict[str, Any]:
         lines = [f"Shared dir: {self.shared_dir}"]
@@ -351,7 +441,10 @@ class FileScionProvider(ScionProvider):
             for c in claims:
                 data = self._read_json(c)
                 if data.get("expires_at_epoch", 0) > time.time():
-                    lines.append(f"- {data.get('claimed_path')} owner={data.get('agent_id')} mode={data.get('mode')}")
+                    line = f"- {data.get('claimed_path')} owner={data.get('agent_id')} mode={data.get('mode')}"
+                    excl = data.get("exclusions", [])
+                    if excl: line += f" (excluding: {','.join(excl)})"
+                    lines.append(line)
 
         wts = sorted(self.worktrees_dir.glob("*.json"))
         if not wts:
@@ -360,7 +453,8 @@ class FileScionProvider(ScionProvider):
             lines.append("Reserved worktrees:")
             for w in wts:
                 data = self._read_json(w)
-                lines.append(f"- owner={data.get('agent_id')} branch={data.get('branch')} path={data.get('path')}")
+                if data.get("expires_at_epoch", 0) > time.time():
+                    lines.append(f"- owner={data.get('agent_id')} branch={data.get('branch')} path={data.get('path')}")
 
         if include_events:
             events = sorted(self.events_dir.glob("*.json"), reverse=True)[:event_limit]
@@ -376,24 +470,45 @@ class FileScionProvider(ScionProvider):
 
     def query_peers(self, agent_id: str, query: str, candidate_files: list[str]) -> dict[str, Any]:
         normalized = _normalize_paths(candidate_files)
+        
+        # Load all existing claims to find conflicts correctly (respecting exclusions)
+        claim_records = []
+        for p in self.claims_dir.rglob("*.json"):
+            rec = self._read_json(p)
+            if rec and rec.get("expires_at_epoch", 0) > time.time() and rec.get("agent_id") != agent_id:
+                claim_records.append(rec)
+
         conflicts = []
+        authoritative_paths = set()
+        for rec in claim_records:
+            owner = rec.get('agent_id')
+            claimed = rec.get('claimed_path', "")
+            authoritative_paths.add((owner, claimed))
+            for c in normalized:
+                if _paths_overlap(c, claimed):
+                    if c not in rec.get("exclusions", []):
+                        conflicts.append(f"{owner} -> {c} (peer claim: {claimed})")
+
         peers = []
         for f in self.agents_dir.glob("*.json"):
             data = self._read_json(f)
-            if data.get("agent_id") == agent_id: continue
+            pid = data.get("agent_id")
+            if pid == agent_id: continue
             if data.get("expires_at_epoch", 0) <= time.time(): continue
             
             peer_claims = data.get("claimed_files", [])
-            for c in normalized:
-                for pc in peer_claims:
-                    if _paths_overlap(c, pc):
-                        conflicts.append(f"{data.get('agent_id')} -> {c} (peer claim: {pc})")
+            # Also check for advisory conflicts (claims not in claim_records)
+            for pc in peer_claims:
+                if (pid, pc) not in authoritative_paths:
+                    for c in normalized:
+                        if _paths_overlap(c, pc):
+                            conflicts.append(f"{pid} -> {c} (peer claim: {pc})")
             
-            peers.append(f"{data.get('agent_id')} status={data.get('status')} claims={','.join(peer_claims)}")
+            peers.append(f"{pid} status={data.get('status')} claims={','.join(peer_claims)}")
 
         text = ""
         if conflicts:
-            text += "Conflicts detected with active peers:\n" + "\n".join(conflicts) + "\n\n"
+            text += "Conflicts detected with active peers:\n" + "\n".join(sorted(list(set(conflicts)))) + "\n\n"
         else:
             text += "No direct conflicts detected.\n\n"
         
@@ -402,12 +517,36 @@ class FileScionProvider(ScionProvider):
 
     def prune_stale(self, event_retention_seconds: int) -> dict[str, Any]:
         now = time.time()
-        count = 0
+        agent_count = 0
         for f in self.agents_dir.glob("*.json"):
             if self._read_json(f).get("expires_at_epoch", 0) < now:
                 f.unlink()
-                count += 1
-        return {"content": [{"type": "text", "text": f"Pruned {count} stale agent state file(s)."}]}
+                agent_count += 1
+        
+        claim_count = 0
+        for f in self.claims_dir.rglob("*.json"):
+            if self._read_json(f).get("expires_at_epoch", 0) < now:
+                f.unlink()
+                claim_count += 1
+        
+        worktree_count = 0
+        for f in self.worktrees_dir.rglob("*.json"):
+            if self._read_json(f).get("expires_at_epoch", 0) < now:
+                f.unlink()
+                worktree_count += 1
+
+        cutoff = now - max(60, event_retention_seconds)
+        event_count = 0
+        for f in self.events_dir.glob("*.json"):
+            try:
+                ts = int(f.name.split("-")[0])
+                if ts / 1000.0 < cutoff:
+                    f.unlink()
+                    event_count += 1
+            except:
+                pass
+
+        return {"content": [{"type": "text", "text": f"Pruned {agent_count} stale agent state file(s) {claim_count} stale claim file(s) {worktree_count} stale worktree record(s) and {event_count} expired event(s)."}]}
 
 
 # --- Redis-Backed Provider Implementation ---
@@ -437,12 +576,16 @@ class RedisScionProvider(ScionProvider):
     def claim_files(self, agent_id: str, files: list[str], mode: str, intent: str, message: str, ttl_seconds: int | None, takeover_from: str, metadata: dict[str, Any]) -> dict[str, Any]:
         ttl = ttl_seconds or _default_ttl_seconds()
         normalized = _normalize_paths(files)
+        took_over_from = set()
         for f in normalized:
             key = self._claim_key(f)
             if mode == "exclusive" and not self.r.set(key, agent_id, nx=True, ex=ttl):
                 owner = self.r.get(key)
                 if owner != agent_id: raise RuntimeError(f"Conflicting Scion claims detected: {owner} -> {f}")
             else:
+                if mode == "takeover":
+                    owner = self.r.get(key)
+                    if owner == takeover_from: took_over_from.add(owner)
                 self.r.set(key, agent_id, ex=ttl)
         
         agent_key = self._agent_key(agent_id)
@@ -450,7 +593,11 @@ class RedisScionProvider(ScionProvider):
         new_claims = sorted(list(set(current + normalized)))
         self.r.hset(agent_key, "claimed_files", json.dumps(new_claims))
         self.r.expire(agent_key, ttl)
-        return {"content": [{"type": "text", "text": f"Claimed (Redis) {len(normalized)} file(s) for {agent_id}."}]}
+        
+        text = f"Claimed (Redis) {len(normalized)} file(s) for {agent_id}."
+        if took_over_from:
+            text += f"\nTook over exact claims from: {', '.join(sorted(took_over_from))}"
+        return {"content": [{"type": "text", "text": text}]}
 
     def release_claims(self, agent_id: str, files: list[str], note: str, ttl_seconds: int | None) -> dict[str, Any]:
         agent_key = self._agent_key(agent_id)
@@ -541,7 +688,7 @@ def handle_request(request: dict) -> dict:
         if tool == "scion_release_claims":
             return provider.release_claims(agent_id, args.get("files", []), args.get("note", ""), args.get("ttl_seconds"))
         if tool == "scion_heartbeat":
-            return provider.heartbeat(agent_id, args.get("status"), args.get("intent"), args.get("message"), args.get("ttl_seconds"))
+            return provider.heartbeat(agent_id, status=args.get("status"), intent=args.get("intent"), message=args.get("message"), ttl_seconds=args.get("ttl_seconds"))
         if tool == "scion_inspect_state":
             return provider.inspect_state(args.get("include_events", True), args.get("event_limit", 10))
         if tool == "scion_query_peers":
