@@ -5,7 +5,7 @@
 ## 1. 아키텍처 패러다임 전환
 - **Personal Agent & LLM-Wiki**: 정형화된 테스트 기반의 Meta-Loop에서 탈피하여, 에이전트가 스스로 지식(Wiki)을 관리하고 OS 컨텍스트와 연동되는 유연한 체제로 전환되었습니다.
 - **Token Efficiency**: 160KB 이상의 레거시 코드를 제거하고 `output_compactor`를 도입하여 컨텍스트 효율을 극대화했습니다.
-- **Retired Surface Cleanup**: `meta_loop_ops.py`, `control_plane_admin.py`, `recipes/harness-self-optimize.yaml`는 2026-04-07 이후 더 이상 라이브 표면이 아닙니다.
+- **Retired Surface Cleanup**: `recipes/harness-self-optimize.yaml`는 2026-04-07 이후 더 이상 라이브 표면이 아닙니다. (참고: `control_plane.py` 및 `meta_loop_ops.py`는 투명성 기록 유지를 위해 복구 및 유지 관리됩니다.)
 
 ## 2. 하드웨어 및 모델 정책 (Gemma 4 + Ollama)
 - **대상 하드웨어**: MacBook Pro M3 Pro (36GB RAM 권장)
@@ -13,7 +13,7 @@
 - **Local Worker Contract**: Ollama 경로는 `ANGELLA_LOCAL_WORKER_BACKEND=ollama`, `ANGELLA_OLLAMA_BASE_URL`, `ANGELLA_WORKER_MODEL`을 사용하는 canonical path로 삼습니다.
 - **Local LLM 역할 분리**: 로컬 구현/수정/다단계 reasoning worker는 Gemma 4 Ollama를 우선 사용합니다.
 - **Tool-calling 및 Thinking 보정**: Gemma 4의 네이티브 태그 파싱 오류 및 Ollama의 `thinking` 필드 간섭을 하네스 단(`scripts/ollama_proxy.py` 및 `tool_parser_wrapper.py`)에서 가로채어 보정합니다.
-- **Swarm Coordination Stance**: Scion은 현재 실서비스 백플레인은 아니지만, Angella는 `.scion/shared` 또는 `SCION_SHARED_DIR` 기반의 file-backed coordination MVP를 통해 peer discovery, file claim, broadcast, worktree reservation을 수행합니다.
+- **Swarm Coordination Stance**: Scion은 실서비스 백플레인은 아니지만, **Hub-and-Spoke 브랜치 토폴로지**와 **계층적 스케줄링 정책**을 통해 다중 에이전트 간의 파일 경합을 방지합니다. 상세 내용은 `knowledge/sops/scion-topology-and-scheduling.md`를 참조하세요.
 
 ## 3. 프로젝트 구조 (Directory Map)
 ```text
@@ -25,17 +25,22 @@ Angella/
 │   └── harness-profiles.yaml   # 역할별 라우팅 정책
 ├── knowledge/                  # 공유 wiki 저장소 (현재 repo 내부 디렉터리)
 │   ├── sources/                # 수집된 원천 자료
-│   └── wiki/                   # 구조화된 지식 페이지
+│   ├── wiki/                   # 구조화된 지식 페이지
+│   └── sops/                   # 운영 절차 (Scion Topology & Scheduling 포함)
 ├── recipes/                    # 에이전트 워크플로우 (Goose Recipes)
 │   ├── autoresearch-loop.yaml  # 코드 최적화 (Ratchet Loop)
 │   └── personal-agent-loop.yaml# 개인 비서 및 OS 제어
 ├── mcp-servers/                # 전용 기능 확장 (MCP)
+│   ├── control_plane.py        # 아티팩트 정규화 및 영속화 (Restored)
+│   ├── meta_loop_ops.py        # 아티팩트 승격 및 PR 자동화 (Restored)
 │   ├── metric_benchmark.py     # 공통 benchmark schema
 │   ├── llmwiki_compiler_ops.py # 위키 관리 도구
 │   ├── output_compactor.py     # 로그 압축 도구
 │   ├── personal_context_ops.py # OS 연동 도구
 │   ├── scion_coordination_ops.py # Scion file-backed coordination MVP
 │   └── tool_parser_wrapper.py  # Gemma 4 tool-call 보정
+├── scripts/
+│   └── ollama_proxy.py         # Ollama 'thinking' 필드 제거 프록시
 └── logs/                       # 실행 결과 및 투명성 리포트
 ```
 
