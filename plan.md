@@ -19,16 +19,18 @@ Angella는 모델 독립적인 **지능형 하네스(Harness)**를 통해 에이
 - `setup.sh` 자동화 및 배포 안정화.
 - Git 브랜치 기반의 Ratchet Loop 안착.
 
-### Phase 5 (진행 중) - 워커 고도화
-- Local Gemma 4 + MLX + TurboQuant 최적화 연동.
+### Phase 5 (완료) - 워커 고도화
+- Local Gemma 4 + Ollama + Unsloth GGUF 최적화 연동.
+- `ollama-proxy`를 통한 Tool-calling 파싱 안정성 확보.
 - 모델 역량 기반의 지능형 하네스 카탈로그 완성.
 
 ### Phase 6 (완료) - 지식 통합
-- Python 기반 legacy Meta-Loop를 NPM `llm-wiki-compiler`로 완전 대체.
+- Python 기반 legacy Meta-Loop를 NPM `llm-wiki-compiler`로 완전 대체. (참고: 투명성 제어를 위한 `control_plane`은 Python MCP로 유지)
 - Personal Context (Calendar, Note) 연동 MCP 구축.
 
 ### Phase 7 (진행 중) - 군집 지능 (Swarm)
 - **Google Scion** 개념을 참조하는 file-backed coordination MVP 구현 (`.scion/shared`, `SCION_SHARED_DIR`).
+- Hub-and-Spoke 브랜치 토폴로지 및 계층적 스케줄링 정책 수립.
 - 에이전트 간 file claim, heartbeat, broadcast, peer query를 통한 충돌 방지 조정 레이어 강화.
 - 다음 단계: 실제 hub/backplane 연동과 multi-worktree orchestration 고도화.
 

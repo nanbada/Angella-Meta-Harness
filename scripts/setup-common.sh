@@ -32,8 +32,6 @@ ANGELLA_CONTROL_INSTALL_TELEMETRY_PATH="${ANGELLA_CONTROL_INSTALL_TELEMETRY_PATH
 ANGELLA_CUSTOM_PROVIDER_DIR="${ANGELLA_CUSTOM_PROVIDER_DIR:-${GOOSE_CONFIG_DIR}/custom_providers}"
 ANGELLA_HARNESS_MODELS_PATH="${ANGELLA_HARNESS_MODELS_PATH:-${SCRIPT_DIR}/config/harness-models.yaml}"
 ANGELLA_HARNESS_PROFILES_PATH="${ANGELLA_HARNESS_PROFILES_PATH:-${SCRIPT_DIR}/config/harness-profiles.yaml}"
-ANGELLA_MLX_TEMPLATE_PATH="${ANGELLA_MLX_TEMPLATE_PATH:-${SCRIPT_DIR}/config/custom-providers/mlx-local.json.template}"
-ANGELLA_APFEL_TEMPLATE_PATH="${ANGELLA_APFEL_TEMPLATE_PATH:-${SCRIPT_DIR}/config/custom-providers/apfel-local.json.template}"
 
 CHECK_RENDER_DIR="${CHECK_RENDER_DIR:-}"
 OLLAMA_TAGS_JSON="${OLLAMA_TAGS_JSON:-}"
@@ -213,33 +211,11 @@ resolve_env_mlx_path() {
 }
 
 normalize_local_worker_env() {
-    local used_apfel_alias=false
-
-    if [ -z "${ANGELLA_MLX_BASE_URL:-}" ] && [ -n "${ANGELLA_APFEL_BASE_URL:-}" ]; then
-        ANGELLA_MLX_BASE_URL="$ANGELLA_APFEL_BASE_URL"
-        used_apfel_alias=true
-    fi
-
-    if [ -z "${ANGELLA_MLX_MODEL:-}" ] && [ -n "${ANGELLA_APFEL_MODEL:-}" ]; then
-        ANGELLA_MLX_MODEL="$ANGELLA_APFEL_MODEL"
-        used_apfel_alias=true
-    fi
-
     if [ -z "${ANGELLA_LOCAL_WORKER_BACKEND:-}" ]; then
-        if [ -n "${ANGELLA_MLX_BASE_URL:-}" ] || [ -n "${ANGELLA_MLX_MODEL:-}" ]; then
-            ANGELLA_LOCAL_WORKER_BACKEND="mlx"
-        else
-            ANGELLA_LOCAL_WORKER_BACKEND="ollama"
-        fi
+        ANGELLA_LOCAL_WORKER_BACKEND="ollama"
     fi
 
-    export ANGELLA_LOCAL_WORKER_BACKEND ANGELLA_MLX_BASE_URL ANGELLA_MLX_MODEL
-
-    if [ "$used_apfel_alias" = true ] && [ "${ANGELLA_APFEL_ALIAS_WARNED:-false}" != "true" ]; then
-        warn "ANGELLA_APFEL_BASE_URL / ANGELLA_APFEL_MODEL are deprecated aliases. Use ANGELLA_MLX_BASE_URL / ANGELLA_MLX_MODEL."
-        ANGELLA_APFEL_ALIAS_WARNED=true
-        export ANGELLA_APFEL_ALIAS_WARNED
-    fi
+    export ANGELLA_LOCAL_WORKER_BACKEND
 }
 
 load_mlx_environment() {
@@ -673,56 +649,6 @@ ensure_bootstrap_environment() {
     info "Bootstrapping Python environment..."
     install_python_requirements "$SCRIPT_DIR/mcp-servers/requirements.txt"
     write_bootstrap_state
-}
-
-render_mlx_custom_provider() {
-    local target_path="${ANGELLA_CUSTOM_PROVIDER_DIR}/angella_mlx_local.json"
-    local base_url="${ANGELLA_MLX_BASE_URL:-}"
-    local model_name="${ANGELLA_MLX_MODEL:-mlx-community/gemma-4-31b-it-4bit}"
-
-    if [ -z "$base_url" ]; then
-        return 0
-    fi
-
-    mkdir -p "$ANGELLA_CUSTOM_PROVIDER_DIR"
-    sed \
-        -e "s|__ANGELLA_MLX_BASE_URL__|$(escape_sed_replacement "$base_url")|g" \
-        -e "s|__ANGELLA_MLX_MODEL__|$(escape_sed_replacement "$model_name")|g" \
-        "$ANGELLA_MLX_TEMPLATE_PATH" >"$target_path"
-}
-
-render_apfel_custom_provider() {
-    local target_path="${ANGELLA_CUSTOM_PROVIDER_DIR}/angella_apfel_local.json"
-    local base_url="${ANGELLA_APFEL_BASE_URL:-}"
-    local model_name="${ANGELLA_APFEL_MODEL:-apple-foundationmodel}"
-
-    if [ -z "$base_url" ]; then
-        return 0
-    fi
-
-    mkdir -p "$ANGELLA_CUSTOM_PROVIDER_DIR"
-    sed \
-        -e "s|__ANGELLA_APFEL_BASE_URL__|$(escape_sed_replacement "$base_url")|g" \
-        -e "s|__ANGELLA_APFEL_MODEL__|$(escape_sed_replacement "$model_name")|g" \
-        "$ANGELLA_APFEL_TEMPLATE_PATH" >"$target_path"
-}
-
-render_local_custom_providers() {
-    render_mlx_custom_provider
-
-    if [ -n "${ANGELLA_APFEL_BASE_URL:-}" ] || [ "$ANGELLA_WORKER_PROVIDER" = "angella_apfel_local" ]; then
-        render_apfel_custom_provider
-    fi
-}
-
-ensure_selected_worker_runtime() {
-    if [ "$ANGELLA_WORKER_PROVIDER" = "ollama" ]; then
-        pull_model "$ANGELLA_WORKER_MODEL"
-    elif [ "$ANGELLA_WORKER_PROVIDER" = "angella_mlx_local" ]; then
-        render_mlx_custom_provider
-    elif [ "$ANGELLA_WORKER_PROVIDER" = "angella_apfel_local" ]; then
-        render_apfel_custom_provider
-    fi
 }
 
 check_homebrew() {

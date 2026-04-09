@@ -29,7 +29,14 @@
 - **Preflight**: Dirty Worktree(미커밋 변경사항 존재) 상태에서는 루프를 시작하지 않습니다.
 - **Ratchet**: `compare_metrics` 결과가 개선일 때만 `keep` 하고, 그 외에는 즉시 `git revert HEAD --no-edit`를 수행합니다.
 
-## 4. Transparency (투명성)
+## 4. Scion Topology Contract (군집 조정 계약)
+다중 에이전트 환경에서 작업 충돌을 방지하기 위해 아래 규약을 준수합니다.
+- **Hub-and-Spoke**: 모든 작업 브랜치는 `main`에서 분기하며, 작업 완료 시 PR을 통해 통합됩니다.
+- **Tiered Priority**: 작업 성격에 따라 우선순위(`Emergency` > `Directive` > `Autoresearch`)를 부여하고 경합 시 상위 티어가 우선권을 가집니다.
+- **Fair Heartbeat**: 모든 에이전트는 5분 이내 주기로 상태를 갱신해야 하며, 유효하지 않은 Claim은 `scion_prune_stale` 대상이 됩니다.
+
+## 5. Transparency (투명성)
 - 모든 기록은 `run_id` 단위로 `$ANGELLA_ROOT/logs/Goose Logs/`에 저장됩니다.
 - **Session Log**: 각 iteration의 가설, 시도, 측정값, 판정 근거 기록.
 - **Final Report**: 전체 루프의 성공 여부, 최종 메트릭, 누적 Git Diff 요약.
+- **Telemetry**: `control_plane` 모듈을 통해 모든 이벤트가 JSONL 형태로 기록됩니다.

@@ -24,7 +24,6 @@ if [ -n "$HARNESS_PROFILE" ] || [ -n "$LEAD_MODEL_OVERRIDE" ] || [ -n "$PLANNER_
     write_bootstrap_state
 fi
 
-render_local_custom_providers
 install_templates
 
 mkdir -p "$SCRIPT_DIR/logs/Goose Logs"
