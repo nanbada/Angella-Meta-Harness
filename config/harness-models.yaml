@@ -162,6 +162,27 @@
       "auto_pull_on_bootstrap": false,
       "flags": ["mlx_local", "reasoning", "local", "fallback", "augment", "cache"],
       "tier": "local"
+    },
+    {
+      "id": "ollama_gemma4_26b_gguf",
+      "provider": "ollama",
+      "goose_provider": "ollama",
+      "model": "gemma4:26b-gguf",
+      "display_name": "Ollama Gemma 4 26B GGUF (Unsloth)",
+      "role_support": ["worker"],
+      "context_limit": 8192,
+      "temperature_default": 0.2,
+      "tool_use_score": 80,
+      "reasoning_score": 90,
+      "latency_score": 70,
+      "cost_score": 90,
+      "stability_score": 88,
+      "priority": 80,
+      "requires_env": [],
+      "availability_check": ["ollama_model:gemma4:26b-gguf"],
+      "auto_pull_on_bootstrap": false,
+      "flags": ["reasoning", "local", "fallback", "augment", "cache"],
+      "tier": "local"
     }
   ]
 }

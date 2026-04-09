@@ -7,13 +7,13 @@
 - **Token Efficiency**: 160KB 이상의 레거시 코드를 제거하고 `output_compactor`를 도입하여 컨텍스트 효율을 극대화했습니다.
 - **Retired Surface Cleanup**: `meta_loop_ops.py`, `control_plane_admin.py`, `recipes/harness-self-optimize.yaml`는 2026-04-07 이후 더 이상 라이브 표면이 아닙니다.
 
-## 2. 하드웨어 및 모델 정책 (Gemma 4 + MLX)
+## 2. 하드웨어 및 모델 정책 (Gemma 4 + Ollama)
 - **대상 하드웨어**: MacBook Pro M3 Pro (36GB RAM 권장)
-- **워커 모델**: `mlx-community/gemma-4-31b-it-4bit` (TurboQuant 최적화)
-- **Local Worker Contract**: MLX 경로는 `ANGELLA_LOCAL_WORKER_BACKEND=mlx`, `ANGELLA_MLX_BASE_URL`, `ANGELLA_MLX_MODEL`을 사용하는 OpenAI-compatible local endpoint topology를 canonical path로 삼습니다.
-- **Local LLM 역할 분리**: 로컬 구현/수정/다단계 reasoning worker는 Gemma 4 MLX를 우선 사용합니다. legacy `apfel_foundationmodel`은 단순 확인, 짧은 질문 응답, 저지연 보조 확인용으로만 유지하며 기본 coding worker로는 사용하지 않습니다.
-- **Tool-calling 보정**: Gemma 4의 네이티브 태그 파싱 오류를 하네스 단(`tool_parser_wrapper.py`)에서 가로채어 보정합니다.
-- **Swarm Coordination Stance**: Scion은 현재 실서비스 백플레인은 아니지만, Angella는 `.scion/shared` 또는 `SCION_SHARED_DIR` 기반의 file-backed coordination MVP를 통해 peer discovery, file claim, broadcast를 수행합니다.
+- **워커 모델**: `unsloth/gemma-4-26B-A4B-it-GGUF` (Ollama 기반)
+- **Local Worker Contract**: Ollama 경로는 `ANGELLA_LOCAL_WORKER_BACKEND=ollama`, `ANGELLA_OLLAMA_BASE_URL`, `ANGELLA_WORKER_MODEL`을 사용하는 canonical path로 삼습니다.
+- **Local LLM 역할 분리**: 로컬 구현/수정/다단계 reasoning worker는 Gemma 4 Ollama를 우선 사용합니다.
+- **Tool-calling 및 Thinking 보정**: Gemma 4의 네이티브 태그 파싱 오류 및 Ollama의 `thinking` 필드 간섭을 하네스 단(`scripts/ollama_proxy.py` 및 `tool_parser_wrapper.py`)에서 가로채어 보정합니다.
+- **Swarm Coordination Stance**: Scion은 현재 실서비스 백플레인은 아니지만, Angella는 `.scion/shared` 또는 `SCION_SHARED_DIR` 기반의 file-backed coordination MVP를 통해 peer discovery, file claim, broadcast, worktree reservation을 수행합니다.
 
 ## 3. 프로젝트 구조 (Directory Map)
 ```text
@@ -41,7 +41,7 @@ Angella/
 
 ## 4. 로컬 캐시 및 환경 전략
 - **Repo-Local Knowledge Path**: `knowledge/`와 특히 `knowledge/sources/`는 현재 repo 내부 canonical 경로입니다. MCP helper는 더 이상 외부 knowledge root override를 해석하지 않고 이 내부 경로에만 읽기/쓰기를 수행합니다.
-- **MLX Runtime Inputs**: `setup.sh`는 `.env.mlx` 또는 `.env.mlx.example`를 bootstrap/check/install 단계에서 읽고, MLX worker 선택 시 Goose custom provider `angella_mlx_local`을 자동 렌더링합니다.
+- **Ollama Runtime Inputs**: `setup.sh`는 `.env.mlx` (Ollama 설정 포함) 또는 `.env.mlx.example`를 bootstrap/check/install 단계에서 읽고, Ollama worker 선택 시 Goose custom provider `angella_ollama_local`을 자동 렌더링합니다.
 - **Personal Agent Local Fallback Signal**: `personal_agent_tier`는 `ANGELLA_LOCAL_CONTEXT_NEEDED=true` 또는 `ANGELLA_PRIVATE_MODE=true`일 때 local worker fallback을 허용합니다.
 - **Bootstrap Env**: `.cache/angella/bootstrap-venv` (런타임 격리)
 - **Cache Paths**: `.cache/angella/uv`, `.cache/angella/pip`
@@ -57,3 +57,4 @@ Angella/
 - **personal-context**: clipboard/calendar/reminders와 raw source ingest를 통해 OS 컨텍스트를 Angella 쪽으로 가져옵니다.
 - **scion-coordination**: Google Scion 개념을 참조하는 file-backed coordination 레이어입니다. active peer 상태, authoritative claim file, reserved worktree record, worktree registration, heartbeat, broadcast event를 shared dir에 기록해 충돌을 줄입니다.
 - **tool-parser-wrapper**: Gemma 4의 native tool-call tag를 MCP 친화적 문자열로 정규화합니다.
+- **ollama-proxy**: Ollama API 응답에서 `thinking` 필드를 제거하여 Goose의 JSON 파싱 오류를 방지하는 투명 프록시입니다.

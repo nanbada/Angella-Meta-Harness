@@ -82,3 +82,4 @@ Angella의 Phase 7 Scion 기능은 실서비스 hub가 아니라 **file-backed c
 - exclusive mode는 authoritative claim file을 쓰고, `scion_prepare_worktree`를 함께 쓰면 branch/path ownership까지 예약합니다.
 - TTL 기반이므로 heartbeat 없이 장시간 멈추면 stale state로 간주될 수 있습니다.
 - Scion은 이제 git worktree 생성/제거 helper까지 제공하지만, 더 복잡한 branch topology 결정과 multi-stage scheduling은 아직 외부 orchestration이 담당합니다.
+- 상세한 브랜치 구조 및 스케줄링 정책은 **[`knowledge/sops/scion-topology-and-scheduling.md`](../knowledge/sops/scion-topology-and-scheduling.md)**를 참조하세요.

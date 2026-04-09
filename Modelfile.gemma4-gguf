@@ -1,0 +1,11 @@
+FROM /Users/nanbada/.ollama/models/blobs/sha256-52de2d7c8efde0a3c99825440e1fb23d6075168978dc6d31f8e6fa5a29f49f4c
+
+# Use a minimal template to prevent Ollama from injecting thinking blocks into structured fields
+TEMPLATE """<bos>{{ if .Prompt }}<start_of_turn>user
+{{ .Prompt }}<end_of_turn>
+{{ end }}<start_of_turn>model
+{{ .Response }}<end_of_turn>
+"""
+
+PARAMETER stop "<end_of_turn>"
+PARAMETER stop "<bos>"

@@ -84,7 +84,7 @@ extensions:
     timeout: 300
     description: "Google Scion Hub를 통해 병렬로 동작 중인 다른 Angella 에이전트와 충돌을 방지하고 지식을 공유"
 
-  instructions: |
+instructions: |
   당신은 frontier-first personal agent harness 위에서 동작하는 Angella Autoresearch 에이전트입니다.
   이 workflow의 핵심은 모델 수가 아니라 명확한 intent contract, 엄격한 preflight, 공통 benchmark schema, run-scoped transparency, 그리고 **Token Efficiency & Active Memory**입니다.
 

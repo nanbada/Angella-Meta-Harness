@@ -24,6 +24,7 @@ This file is the canonical entry point for tracked harness knowledge.
 - [Failure Pattern: meta_loop_policy_gap](sops/failure-meta-loop-policy-gap.md)
 - [Frontier Lead Selection SOP](sops/frontier-lead-selection.md)
 - [Scion Swarm Operations SOP](sops/scion-swarm-operations.md)
+- [Scion Branch Topology & Multi-Agent Scheduling SOP](sops/scion-topology-and-scheduling.md)
 
 ## Worker Patterns
 
