@@ -4,15 +4,27 @@
 이 프로젝트는 MacBook Pro M3 36GB에서 Goose AI Agent의
 Frontier-First Personal Agent Harness를 구현합니다.
 
+## 프로젝트 운영 및 토큰 효율화 (CRITICAL)
+이 프로젝트는 MacBook M3 환경에서 동작하며, 컨텍스트 효율을 극대화하는 것이 성능의 핵심입니다.
+
+### 1. Token Efficiency (Mandatory)
+*   **Compaction-First**: 도구 출력(git status, build log, search results 등)이 1KB를 초과할 가능성이 있다면, 반드시 `output-compactor`의 `compact_output_text`를 사용하여 요약된 정보를 먼저 확인하세요. 원문 그대로를 읽는 것은 '컨텍스트 부패(Context Rot)'의 주범입니다.
+*   **Minimalist Ingestion**: 100줄 이상의 대형 파일을 읽을 때는 `read_file` 대신 `grep_search`나 `glob`으로 범위를 좁히는 단계를 선행하세요.
+*   **State Compression**: 여러 단계의 중간 결과를 매번 나열하지 말고, 핵심 "Snapshot" 또는 "Fact"로 압축하여 다음 턴으로 넘기세요.
+
+### 2. Search-First Memory
+*   모든 기술적 결정이나 구현 시도 전에 `llmwiki_query`를 호출하여 과거의 동일 패턴, 실패 사례(Negative Memory), 또는 수립된 SOP가 있는지 확인하세요. 중복된 시행착오는 토큰 낭비일 뿐만 아니라 하네스 철학에 위배됩니다.
+
+### 3. Ratchet Pattern & Verification
+*   모든 변경은 메트릭 개선이 증명되어야만 `keep` 될 수 있습니다.
+*   실패한 시도는 반드시 원인을 분석하여 LLM-Wiki에 지식화하고 즉시 `revert` 하세요.
+
 ## 시작 순서 (가장 중요)
 대화를 시작하면 아래 파일을 먼저 읽으세요.
-1. `README.md`
-2. `docs/arch-snapshot.md`
-3. `plan.md`
-
-규격과 행동 원칙이 더 필요하면 아래를 추가로 읽으세요.
-- `docs/spec-contracts.md`
-- `knowledge/sops/harness-philosophy.md`
+1. `GEMINI.md` (Engineering Protocol)
+2. `README.md`
+3. `docs/arch-snapshot.md`
+4. `plan.md`
 
 ## 프로젝트 구조
 - `recipes/` — Goose recipe YAML 파일들 (`autoresearch-loop`, `personal-agent-loop`)

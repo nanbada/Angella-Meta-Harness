@@ -23,3 +23,7 @@ Angella의 모든 에이전트 활동은 이 하네스 철학을 최우선으로
 - 세션 시작 시 `scion_prune_stale`와 `scion_inspect_state`로 현재 coordination state를 먼저 점검합니다.
 - 대규모 수정 전 동료 에이전트와의 충돌 여부를 `scion_query_peers`로 확인합니다.
 - 수정 범위가 정해지면 `scion_claim_files`로 claim을 남기고, 긴 작업은 `scion_heartbeat`로 갱신하며, 작업 완료 후 `scion_release_claims`로 해제합니다.
+
+---
+**Evidence**: [Source: Anatomy of the Harness](../sources/ref-harness-anatomy.md)
+**Verified against Raw**: 2026-04-09

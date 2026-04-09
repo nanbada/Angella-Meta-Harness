@@ -143,11 +143,11 @@
       "tier": "local"
     },
     {
-      "id": "mlx_gemma4_31b_it_4bit",
+      "id": "mlx_gemma4_26b_it_gguf",
       "provider": "custom",
       "goose_provider": "angella_mlx_local",
-      "model": "mlx-community/gemma-4-31b-it-4bit",
-      "display_name": "MLX Gemma 4 31B It (4-bit)",
+      "model": "gemma-4-26B-A4B-it-GGUF",
+      "display_name": "MLX Gemma 4 26B It (GGUF)",
       "role_support": ["worker"],
       "context_limit": 8192,
       "temperature_default": 0.2,
@@ -167,7 +167,7 @@
       "id": "ollama_gemma4_26b_gguf",
       "provider": "ollama",
       "goose_provider": "ollama",
-      "model": "gemma4:26b-gguf",
+      "model": "gemma-4-26B-A4B-it-GGUF",
       "display_name": "Ollama Gemma 4 26B GGUF (Unsloth)",
       "role_support": ["worker"],
       "context_limit": 8192,
@@ -179,7 +179,7 @@
       "stability_score": 88,
       "priority": 80,
       "requires_env": [],
-      "availability_check": ["ollama_model:gemma4:26b-gguf"],
+      "availability_check": ["ollama_model:gemma-4-26B-A4B-it-GGUF"],
       "auto_pull_on_bootstrap": false,
       "flags": ["reasoning", "local", "fallback", "augment", "cache"],
       "tier": "local"

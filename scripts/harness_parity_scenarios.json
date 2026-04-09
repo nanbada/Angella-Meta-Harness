@@ -70,6 +70,17 @@
         ".goosehints",
         "scripts/test_meta_loop_admin.py"
       ]
+    },
+    {
+      "id": 8,
+      "title": "local worker stabilization (ollama + proxy)",
+      "status": "implemented",
+      "evidence": [
+        "config/harness-models.yaml",
+        "scripts/ollama_proxy.py",
+        "Modelfile.gemma4-gguf",
+        "docs/setup-gemma4-ollama.md"
+      ]
     }
   ]
 }

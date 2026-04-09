@@ -112,7 +112,7 @@ def apfel_healthy(base_url: str) -> bool:
 
 
 def resolved_runtime_model(model: dict) -> str:
-    if model["id"] == "mlx_gemma4_31b_it_4bit":
+    if model["id"] == "mlx_gemma4_26b_it_gguf":
         return effective_mlx_model(model["model"])
     if model["id"] == "apfel_foundationmodel":
         return effective_apfel_model(model["model"])
@@ -318,7 +318,7 @@ def resolve_selection(
     by_id = {model["id"]: model for model in resolved_models}
 
     def unavailable_message(selected: dict) -> str:
-        if selected["id"] == "mlx_gemma4_31b_it_4bit":
+        if selected["id"] == "mlx_gemma4_26b_it_gguf":
             return (
                 f"Model {selected['id']} is unavailable: {selected['disabled_reason']}. "
                 "Check ANGELLA_LOCAL_WORKER_BACKEND=mlx and ANGELLA_MLX_BASE_URL."
@@ -493,12 +493,21 @@ def main() -> None:
     resolve_parser.add_argument("--lead-model")
     resolve_parser.add_argument("--planner-model")
     resolve_parser.add_argument("--worker-model")
+    resolve_parser.add_argument("--complexity", choices=["low", "medium", "high"])
     resolve_parser.add_argument("--format", choices=["shell", "json"], default="shell")
 
     args = parser.parse_args()
 
     models_config = load_json_yaml(MODELS_PATH)
     profiles_config = load_json_yaml(PROFILES_PATH)
+    
+    # Load dynamic routing policies
+    POLICIES_PATH = ROOT_DIR / "config" / "routing-policies.yaml"
+    try:
+        policies = load_json_yaml(POLICIES_PATH)
+    except Exception:
+        policies = {}
+
     resolved_models = resolve_catalog(models_config["models"])
 
     if args.command == "list-models":
@@ -509,13 +518,28 @@ def main() -> None:
         print_list_profiles(resolved_models, profiles_config["profiles"])
         return
 
+    # Dynamic routing logic based on complexity
+    worker_override = args.worker_model
+    if args.complexity and not worker_override:
+        complexity_map = {
+            "low": "low_complexity",
+            "medium": "medium_complexity",
+            "high": "high_complexity"
+        }
+        policy_id = complexity_map.get(args.complexity)
+        for entry in policies.get("assessment", []):
+            if entry["id"] == policy_id:
+                if entry["preferred_worker"] == "local_reasoning":
+                    os.environ["ANGELLA_LOCAL_CONTEXT_NEEDED"] = "true"
+                # Add more sophisticated mapping here if needed
+
     resolution = resolve_selection(
         resolved_models,
         profiles_config["profiles"],
         args.profile,
         args.lead_model,
         args.planner_model,
-        args.worker_model,
+        worker_override,
     )
 
     if args.format == "json":

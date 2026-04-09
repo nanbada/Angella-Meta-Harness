@@ -28,17 +28,16 @@ Angella는 모델 독립적인 **지능형 하네스(Harness)**를 통해 에이
 - Python 기반 legacy Meta-Loop를 NPM `llm-wiki-compiler`로 완전 대체. (참고: 투명성 제어를 위한 `control_plane`은 Python MCP로 유지)
 - Personal Context (Calendar, Note) 연동 MCP 구축.
 
-### Phase 7 (진행 중) - 군집 지능 (Swarm)
+### Phase 7 (완료) - 군집 지능 (Swarm)
 - **Google Scion** 개념을 참조하는 file-backed coordination MVP 구현 (`.scion/shared`, `SCION_SHARED_DIR`).
 - Hub-and-Spoke 브랜치 토폴로지 및 계층적 스케줄링 정책 수립.
 - 에이전트 간 file claim, heartbeat, broadcast, peer query를 통한 충돌 방지 조정 레이어 강화.
-- **Next Task**: 실제 다중 에이전트 동시 실행 필럿 테스트 및 경합 상황(Hard Conflict) 처리 로직 검증.
+- 실제 다중 에이전트 동시 실행 필럿 테스트 및 경합 상황(Hard Conflict) 처리 로직 검증 완료.
 
-### Phase 8 (계획) - 오케스트레이션 및 확장 (Orchestration & Scaling)
-- **Distributed Scion Hub**: file-backed 방식을 넘어 네트워크 기반(Redis/Postgres)의 전역 조정 서버로 전환.
+### Phase 8 (진행 중) - 오케스트레이션 및 확장 (Orchestration & Scaling)
+- **Distributed Scion Hub**: file-backed 방식을 넘어 네트워크 기반(Redis/Postgres)의 전역 조정 서버로 전환. (Next Task: RedisScionProvider 연동 및 검증)
 - **Dynamic Worker Routing**: 작업 난이도에 따라 Local(Gemma 4)과 Frontier(GPT-5.2)를 자동으로 오가며 비용과 성능을 최적화하는 동적 라우팅 구현.
-- **Automated Knowledge Synthesis**: 지식의 밀도를 유지하기 위해 주기적으로 LLM-Wiki를 압축하고 요약하는 'Archivist' 에이전트 루프 도입.
-- **Visual Control Plane**: 현재 동작 중인 Scion 에이전트들의 상태, 점유 파일, 루프 결과 등을 시각화하는 경량 대시보드 구축.
+- **Automated Knowledge Synthesis**: 지식의 밀도를 유지하기 위해 주기적으로 LLM-Wiki를 압축하고 요약하는 'Archivist' 에이전트 루프 도입. (구현 완료: `archivist_ops` MCP, `archivist-loop` recipe, **Meta-Learning**(`lessons.md`) 추출 로직 통합)
 
 ## 4. 성공 지표
 - **Repeatability**: 동일 환경 clone 후 5분 내 실행 성공.

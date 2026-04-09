@@ -220,6 +220,9 @@ normalize_local_worker_env() {
 
 load_mlx_environment() {
     local verbose="${1:-false}"
+    local prev_backend="${ANGELLA_LOCAL_WORKER_BACKEND:-}"
+    local prev_mlx_url="${ANGELLA_MLX_BASE_URL:-}"
+    local prev_mlx_model="${ANGELLA_MLX_MODEL:-}"
 
     resolve_env_mlx_path
     if [ "$verbose" = true ]; then
@@ -227,6 +230,11 @@ load_mlx_environment() {
     fi
     # shellcheck source=/dev/null
     source "$ENV_MLX_PATH"
+
+    if [ -n "$prev_backend" ]; then ANGELLA_LOCAL_WORKER_BACKEND="$prev_backend"; fi
+    if [ -n "$prev_mlx_url" ]; then ANGELLA_MLX_BASE_URL="$prev_mlx_url"; fi
+    if [ -n "$prev_mlx_model" ]; then ANGELLA_MLX_MODEL="$prev_mlx_model"; fi
+
     normalize_local_worker_env
     if [ "$verbose" = true ]; then
         ok "Environment variables loaded"
@@ -265,15 +273,15 @@ render_template() {
     escaped_root="$(escape_sed_replacement "$SCRIPT_DIR")"
     escaped_python="$(escape_sed_replacement "$PYTHON_CMD")"
     escaped_recipe_path="$(escape_sed_replacement "$RENDERED_RECIPE_PATH")"
-    escaped_goose_provider="$(escape_sed_replacement "${ANGELLA_WORKER_PROVIDER:-openai}")"
-    escaped_goose_model="$(escape_sed_replacement "${ANGELLA_WORKER_MODEL:-gpt-5.2}")"
-    escaped_goose_temperature="$(escape_sed_replacement "${ANGELLA_WORKER_TEMPERATURE:-0.3}")"
-    escaped_goose_lead_provider="$(escape_sed_replacement "${ANGELLA_LEAD_PROVIDER:-openai}")"
-    escaped_goose_lead_model="$(escape_sed_replacement "${ANGELLA_LEAD_MODEL:-gpt-5.2-pro}")"
-    escaped_goose_planner_provider="$(escape_sed_replacement "${ANGELLA_PLANNER_PROVIDER:-${ANGELLA_LEAD_PROVIDER:-openai}}")"
-    escaped_goose_planner_model="$(escape_sed_replacement "${ANGELLA_PLANNER_MODEL:-${ANGELLA_LEAD_MODEL:-gpt-5.2-pro}}")"
-    escaped_goose_input_limit="$(escape_sed_replacement "${ANGELLA_WORKER_CONTEXT_LIMIT:-400000}")"
-    escaped_harness_profile="$(escape_sed_replacement "${ANGELLA_HARNESS_PROFILE_ID:-frontier_default}")"
+    escaped_goose_provider="$(escape_sed_replacement "${ANGELLA_WORKER_PROVIDER}")"
+    escaped_goose_model="$(escape_sed_replacement "${ANGELLA_WORKER_MODEL}")"
+    escaped_goose_temperature="$(escape_sed_replacement "${ANGELLA_WORKER_TEMPERATURE}")"
+    escaped_goose_lead_provider="$(escape_sed_replacement "${ANGELLA_LEAD_PROVIDER}")"
+    escaped_goose_lead_model="$(escape_sed_replacement "${ANGELLA_LEAD_MODEL}")"
+    escaped_goose_planner_provider="$(escape_sed_replacement "${ANGELLA_PLANNER_PROVIDER}")"
+    escaped_goose_planner_model="$(escape_sed_replacement "${ANGELLA_PLANNER_MODEL}")"
+    escaped_goose_input_limit="$(escape_sed_replacement "${ANGELLA_WORKER_CONTEXT_LIMIT}")"
+    escaped_harness_profile="$(escape_sed_replacement "${ANGELLA_HARNESS_PROFILE_ID}")"
 
     mkdir -p "$(dirname "$output_path")"
     sed \
@@ -289,11 +297,13 @@ render_template() {
         -e "s|__GOOSE_PLANNER_MODEL__|$escaped_goose_planner_model|g" \
         -e "s|__GOOSE_INPUT_LIMIT__|$escaped_goose_input_limit|g" \
         -e "s|__ANGELLA_HARNESS_PROFILE_ID__|$escaped_harness_profile|g" \
-        -e "s|__ANGELLA_EXECUTION_MODE__|$(escape_sed_replacement "${ANGELLA_EXECUTION_MODE:-frontier_primary}")|g" \
-        -e "s|__ANGELLA_WORKER_TIER__|$(escape_sed_replacement "${ANGELLA_WORKER_TIER:-frontier_primary}")|g" \
-        -e "s|__ANGELLA_FRONTIER_REACHABLE__|$(escape_sed_replacement "${ANGELLA_FRONTIER_REACHABLE:-true}")|g" \
-        -e "s|__ANGELLA_LOCAL_CACHE_ENABLED__|$(escape_sed_replacement "${ANGELLA_LOCAL_CACHE_ENABLED:-false}")|g" \
-        -e "s|__ANGELLA_TOKEN_SAVER_ENABLED__|$(escape_sed_replacement "${ANGELLA_TOKEN_SAVER_ENABLED:-false}")|g" \
+        -e "s|__ANGELLA_EXECUTION_MODE__|$(escape_sed_replacement "${ANGELLA_EXECUTION_MODE}")|g" \
+        -e "s|__ANGELLA_WORKER_TIER__|$(escape_sed_replacement "${ANGELLA_WORKER_TIER}")|g" \
+        -e "s|__ANGELLA_FRONTIER_REACHABLE__|$(escape_sed_replacement "${ANGELLA_FRONTIER_REACHABLE}")|g" \
+        -e "s|__ANGELLA_LOCAL_CACHE_ENABLED__|$(escape_sed_replacement "${ANGELLA_LOCAL_CACHE_ENABLED}")|g" \
+        -e "s|__ANGELLA_TOKEN_SAVER_ENABLED__|$(escape_sed_replacement "${ANGELLA_TOKEN_SAVER_ENABLED}")|g" \
+        -e "s|__ANGELLA_MLX_BASE_URL__|$(escape_sed_replacement "${ANGELLA_MLX_BASE_URL}")|g" \
+        -e "s|__ANGELLA_MLX_MODEL__|$(escape_sed_replacement "${ANGELLA_MLX_MODEL}")|g" \
         "$template_path" > "$output_path"
 }
 
@@ -827,16 +837,19 @@ render_all_templates() {
     local config_target=$1
     local recipe_target=$2
     local sub_recipe_dir=$3
+    local custom_provider_dir=$4
 
     verify_template_source_portable "$SCRIPT_DIR/config/goose-config.yaml"
     verify_template_source_portable "$SCRIPT_DIR/recipes/autoresearch-loop.yaml"
     verify_template_source_portable "$SCRIPT_DIR/recipes/sub/code-optimize.yaml"
     verify_template_source_portable "$SCRIPT_DIR/recipes/sub/evaluate-metric.yaml"
+    verify_template_source_portable "$SCRIPT_DIR/config/custom-providers/mlx-local.json.template"
 
     render_and_verify "$SCRIPT_DIR/config/goose-config.yaml" "$config_target"
     render_and_verify "$SCRIPT_DIR/recipes/autoresearch-loop.yaml" "$recipe_target"
     render_and_verify "$SCRIPT_DIR/recipes/sub/code-optimize.yaml" "$sub_recipe_dir/code-optimize.yaml"
     render_and_verify "$SCRIPT_DIR/recipes/sub/evaluate-metric.yaml" "$sub_recipe_dir/evaluate-metric.yaml"
+    render_and_verify "$SCRIPT_DIR/config/custom-providers/mlx-local.json.template" "$custom_provider_dir/angella_mlx_local.json"
 }
 
 check_templates_only() {
@@ -845,7 +858,8 @@ check_templates_only() {
     render_all_templates \
         "$CHECK_RENDER_DIR/config.yaml" \
         "$CHECK_RENDER_DIR/autoresearch-loop.yaml" \
-        "$CHECK_RENDER_DIR/sub"
+        "$CHECK_RENDER_DIR/sub" \
+        "$CHECK_RENDER_DIR/custom_providers"
     ok "Template rendering checks passed"
 }
 
@@ -855,6 +869,7 @@ install_templates() {
     local rendered_recipe_path
     local rendered_code_path
     local rendered_eval_path
+    local rendered_mlx_path
     local existing_config_hash
     local existing_recipe_hash
     local existing_code_hash
@@ -873,11 +888,13 @@ install_templates() {
     rendered_recipe_path="$render_dir/autoresearch-loop.yaml"
     rendered_code_path="$render_dir/sub/code-optimize.yaml"
     rendered_eval_path="$render_dir/sub/evaluate-metric.yaml"
+    rendered_mlx_path="$render_dir/custom_providers/angella_mlx_local.json"
 
     render_all_templates \
         "$rendered_config_path" \
         "$rendered_recipe_path" \
-        "$render_dir/sub"
+        "$render_dir/sub" \
+        "$render_dir/custom_providers"
 
     existing_config_hash="$(sha256_file "$RENDERED_CONFIG_PATH")"
     existing_recipe_hash="$(sha256_file "$RENDERED_RECIPE_PATH")"
@@ -898,7 +915,8 @@ install_templates() {
         config "$rendered_config_path" \
         autoresearch_loop "$rendered_recipe_path" \
         code_optimize "$rendered_code_path" \
-        evaluate_metric "$rendered_eval_path")"
+        evaluate_metric "$rendered_eval_path" \
+        mlx_local "$rendered_mlx_path")"
 
     [ -n "$existing_config_hash" ] && [ "$existing_config_hash" != "$rendered_config_hash" ] && drift_targets+=("config")
     [ -n "$existing_recipe_hash" ] && [ "$existing_recipe_hash" != "$rendered_recipe_hash" ] && drift_targets+=("autoresearch_loop")
@@ -913,10 +931,11 @@ install_templates() {
         ANGELLA_INSTALL_DRIFT_TARGETS_JSON="[]"
     fi
 
-    mkdir -p "$GOOSE_RECIPE_DIR" "$RENDERED_SUB_RECIPE_DIR"
+    mkdir -p "$GOOSE_RECIPE_DIR" "$RENDERED_SUB_RECIPE_DIR" "$ANGELLA_CUSTOM_PROVIDER_DIR"
     cp "$rendered_recipe_path" "$RENDERED_RECIPE_PATH"
     cp "$rendered_code_path" "$RENDERED_SUB_RECIPE_DIR/code-optimize.yaml"
     cp "$rendered_eval_path" "$RENDERED_SUB_RECIPE_DIR/evaluate-metric.yaml"
+    cp "$rendered_mlx_path" "$ANGELLA_CUSTOM_PROVIDER_DIR/angella_mlx_local.json"
 
     if [ -f "$RENDERED_CONFIG_PATH" ]; then
         if [ "$existing_config_hash" = "$rendered_config_hash" ]; then
@@ -1063,19 +1082,19 @@ print_summary() {
     echo "     source $SCRIPT_DIR/.env.mlx"
     echo ""
     echo "  Harness:"
-    echo "     profile: ${ANGELLA_HARNESS_PROFILE_ID:-frontier_default}"
-    echo "     lead: ${ANGELLA_LEAD_PROVIDER:-openai}/${ANGELLA_LEAD_MODEL:-gpt-5.2-pro}"
-    echo "     planner: ${ANGELLA_PLANNER_PROVIDER:-openai}/${ANGELLA_PLANNER_MODEL:-gpt-5.2-pro}"
-    echo "     worker: ${ANGELLA_WORKER_PROVIDER:-openai}/${ANGELLA_WORKER_MODEL:-gpt-5.2}"
-    echo "     local backend: ${ANGELLA_LOCAL_WORKER_BACKEND:-ollama}"
-    echo "     mode: ${ANGELLA_EXECUTION_MODE:-frontier_primary}"
-    echo "     worker tier: ${ANGELLA_WORKER_TIER:-frontier_primary}"
+    echo "     profile: ${ANGELLA_HARNESS_PROFILE_ID}"
+    echo "     lead: ${ANGELLA_LEAD_PROVIDER}/${ANGELLA_LEAD_MODEL}"
+    echo "     planner: ${ANGELLA_PLANNER_PROVIDER}/${ANGELLA_PLANNER_MODEL}"
+    echo "     worker: ${ANGELLA_WORKER_PROVIDER}/${ANGELLA_WORKER_MODEL}"
+    echo "     local backend: ${ANGELLA_LOCAL_WORKER_BACKEND}"
+    echo "     mode: ${ANGELLA_EXECUTION_MODE}"
+    echo "     worker tier: ${ANGELLA_WORKER_TIER}"
     echo "     fallback reason: ${ANGELLA_FALLBACK_REASON:-none}"
-    echo "     local cache enabled: ${ANGELLA_LOCAL_CACHE_ENABLED:-false}"
-    echo "     token saver enabled: ${ANGELLA_TOKEN_SAVER_ENABLED:-false}"
-    if [ "${ANGELLA_LOCAL_WORKER_BACKEND:-ollama}" = "mlx" ] || [ -n "${ANGELLA_MLX_BASE_URL:-}" ]; then
+    echo "     local cache enabled: ${ANGELLA_LOCAL_CACHE_ENABLED}"
+    echo "     token saver enabled: ${ANGELLA_TOKEN_SAVER_ENABLED}"
+    if [ "${ANGELLA_LOCAL_WORKER_BACKEND}" = "mlx" ] || [ -n "${ANGELLA_MLX_BASE_URL:-}" ]; then
         echo "     mlx endpoint: ${ANGELLA_MLX_BASE_URL:-not_configured}"
-        echo "     mlx model: ${ANGELLA_MLX_MODEL:-mlx-community/gemma-4-31b-it-4bit}"
+        echo "     mlx model: ${ANGELLA_MLX_MODEL}"
     fi
     echo ""
     if [ "$CHECK_ONLY" = false ] && [ "$BOOTSTRAP_ONLY" = false ] && [ "${ANGELLA_INSTALL_OVERWRITE_MODE:-not_run}" != "not_run" ]; then

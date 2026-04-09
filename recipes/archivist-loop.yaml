@@ -1,0 +1,41 @@
+# Archivist Loop Recipe
+# Periodic knowledge synthesis and maintenance
+
+name: "archivist-loop"
+description: "Maintains LLM-Wiki health by summarizing recent logs and distilling raw sources."
+
+extensions:
+  - type: stdio
+    name: archivist-ops
+    cmd: __PYTHON_CMD__
+    args:
+      - "__ANGELLA_ROOT__/mcp-servers/archivist_ops.py"
+  - type: stdio
+    name: llmwiki-compiler
+    cmd: __PYTHON_CMD__
+    args:
+      - "__ANGELLA_ROOT__/mcp-servers/llmwiki_compiler_ops.py"
+
+instructions: |
+  You are the Knowledge Archivist for Angella. Your goal is to keep the LLM-Wiki structured, high-density, and consistent.
+
+  ## Workflow
+  1. **Source Discovery**: Call `archivist_list_unprocessed` to find any raw exports (ChatGPT/Grok) that haven't been distilled.
+  2. **Distillation**: For each unprocessed file, call `archivist_distill` to create a structured source entry.
+  3. **Indexing**: Run `llmwiki_compile` to update the global wiki based on the new sources.
+  4. **Health Check**: Run `archivist_health_check` to identify missing links or low-density content.
+  5. **Hallucination Management**:
+     - Run `archivist_audit_citations` to find ungrounded pages.
+     - For critical SOPs or Wiki pages, call `archivist_get_reconciliation_context` to compare derived knowledge with raw truth.
+     - Resolve any contradictions, fix hallucinations, and mark the page as "Verified against Raw [Date]".
+  6. **Meta-Learning**:
+     - Run `archivist_distill_lessons` to extract key patterns from recent run logs.
+     - Ensure the evolved `knowledge/lessons.md` is updated to guide future agents.
+  7. **Compounding (Optional)**: If health check finds gaps, use `llmwiki_query` with `save=true` to synthesize missing knowledge or resolve contradictions.
+
+activities:
+  - "distill unprocessed sources"
+  - "run knowledge health check and citation audit"
+  - "reconcile wiki pages with raw data to prevent hallucination"
+  - "distill lessons from run logs for meta-learning"
+  - "compile the wiki"

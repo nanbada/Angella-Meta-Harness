@@ -4,6 +4,11 @@ Tracked raw-source mirror pages used by the harness wiki.
 
 ## Sources
 
+- [Source: AI Personal Knowledge Base (PKB) Guides - Spisak & Karpathy](source-pkb-guides-spisak-karpathy.md)
+- [Source: PKB Guide - Grok](source-external-local-personal-knowledge-bases-grok.md)
+- [Source: PKB Guide - ChatGPT](source-external-local-personal-knowledge-bases-chatgpt.md)
+- [Source: Top AI Ideas (April 2026)](source-external-ai-2026-4.md)
+- [SOP: Knowledge Compounding and Maintenance](../sops/knowledge-compounding.md)
 - [Source: Source Summary: angella-live-setup-yes-warm-20260405-2342](source-cache-angella-control-plane-runs-angella-live-setup-yes-warm-20260405-2342-summary-json.md)
 - [Source: Source Report: angella-profile-resolution-verification-20260406-1005](source-cache-angella-control-plane-runs-angella-profile-resolution-verification-20260406-1005-report-md.md)
 - [Source: Source Summary: angella-profile-resolution-verification-20260406-1005](source-cache-angella-control-plane-runs-angella-profile-resolution-verification-20260406-1005-summary-json.md)

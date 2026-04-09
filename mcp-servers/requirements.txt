@@ -1,3 +1,4 @@
 # MCP Server Dependencies
 # Install: pip install -r mcp-servers/requirements.txt
 mcp>=1.0.0
+redis>=5.0.0

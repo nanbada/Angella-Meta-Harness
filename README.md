@@ -21,7 +21,7 @@ bash scripts/setup-vault.sh
 goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s
 ```
 
-기본 knowledge source root는 repo 내부 [`knowledge/sources/`](knowledge/sources)입니다. 로컬 구현/수정 worker는 Gemma 4 Ollama (Unsloth GGUF)를 기준으로 둡니다.
+기본 knowledge source root는 repo 내부 [`knowledge/sources/`](knowledge/sources)입니다. 로컬 구현/수정 worker는 `<!--VAR:OLLAMA_MODEL_NAME-->gemma-4-26B-A4B-it-GGUF<!--/VAR-->` (Ollama)를 기준으로 둡니다.
 
 ## 📖 Documentation Map
 

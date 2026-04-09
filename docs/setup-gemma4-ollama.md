@@ -34,7 +34,7 @@ cp .env.mlx.example .env.mlx
 ```bash
 export ANGELLA_LOCAL_WORKER_BACKEND=ollama
 export ANGELLA_OLLAMA_BASE_URL=http://127.0.0.1:11435  # Proxy port
-export ANGELLA_WORKER_MODEL=gemma4:26b-gguf
+export gemma-4-26B-A4B-it-GGUF # AUTO_SYNC:OLLAMA_MODEL_NAME
 ```
 
 ## 3. Ollama Proxy 실행
@@ -52,7 +52,7 @@ python3 scripts/ollama_proxy.py &
 Unsloth의 Gemma 4 GGUF 모델을 Ollama에 등록하려면 프로젝트 루트의 `Modelfile.gemma4-gguf`를 사용하세요.
 
 ```bash
-ollama create gemma4:26b-gguf -f Modelfile.gemma4-gguf
+ollama create gemma-4-26B-A4B-it-GGUF -f Modelfile.gemma4-gguf
 ```
 
 ## 5. Setup 자동화
@@ -61,7 +61,7 @@ Ollama env가 채워져 있으면 Angella는 아래를 자동 처리합니다.
 
 - `bash setup.sh --list-models`
   - `ollama_gemma4_26b_gguf`의 활성화 여부 출력
-- `bash setup.sh --check --worker-model ollama_gemma4_26b_gguf`
+- `bash setup.sh --check --worker-model ollama_gemma4_26b_gguf # AUTO_SYNC:OLLAMA_MODEL_ID`
   - proxy 및 Ollama health 검사
 - `bash setup.sh --install-only`
   - Goose custom provider 및 config 자동 렌더링

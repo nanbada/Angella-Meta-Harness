@@ -13,6 +13,13 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 HARNESS_CATALOG = ROOT_DIR / "scripts" / "harness_catalog.py"
 
+with open(ROOT_DIR / "config" / "project-vars.json", encoding="utf-8") as f:
+    PROJECT_VARS = json.load(f)
+
+MLX_MODEL_ID = PROJECT_VARS["MLX_MODEL_ID"]
+MLX_MODEL_NAME = PROJECT_VARS["MLX_MODEL_NAME"]
+MLX_BASE_URL = PROJECT_VARS["MLX_BASE_URL"]
+
 
 def _run(args: list[str], *, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -60,16 +67,16 @@ def main() -> int:
 
     mlx_env = dict(env)
     mlx_env["ANGELLA_LOCAL_WORKER_BACKEND"] = "mlx"
-    mlx_env["ANGELLA_MLX_BASE_URL"] = "http://127.0.0.1:11435/v1"
-    mlx_env["ANGELLA_MLX_MODEL"] = "mlx-community/gemma-4-31b-it-4bit"
+    mlx_env["ANGELLA_MLX_BASE_URL"] = MLX_BASE_URL
+    mlx_env["ANGELLA_MLX_MODEL"] = MLX_MODEL_NAME
     mlx_env["ANGELLA_MLX_HEALTHCHECK_OK"] = "1"
 
     local_lab = _run(["resolve", "--profile", "local_lab", "--format", "json"], env=mlx_env)
     assert local_lab.returncode == 0, local_lab.stderr
     local_lab_payload = json.loads(local_lab.stdout)
-    assert local_lab_payload["worker"]["id"] == "mlx_gemma4_31b_it_4bit"
+    assert local_lab_payload["worker"]["id"] == MLX_MODEL_ID
     assert local_lab_payload["worker"]["goose_provider"] == "angella_mlx_local"
-    assert local_lab_payload["worker"]["model"] == "mlx-community/gemma-4-31b-it-4bit"
+    assert local_lab_payload["worker"]["model"] == MLX_MODEL_NAME
     assert local_lab_payload["routing"]["worker_tier"] == "local_augment"
     assert local_lab_payload["capabilities"]["mlx_enabled"] is True
 
@@ -78,7 +85,7 @@ def main() -> int:
     private_mlx = _run(["resolve", "--profile", "frontier_private_fallback", "--format", "json"], env=private_mlx_env)
     assert private_mlx.returncode == 0, private_mlx.stderr
     private_mlx_payload = json.loads(private_mlx.stdout)
-    assert private_mlx_payload["worker"]["id"] == "mlx_gemma4_31b_it_4bit"
+    assert private_mlx_payload["worker"]["id"] == MLX_MODEL_ID
     assert private_mlx_payload["routing"]["worker_tier"] == "local_fallback"
     assert private_mlx_payload["routing"]["fallback_reason"] == "private_mode"
 
@@ -95,7 +102,7 @@ def main() -> int:
     )
     assert personal_local_context.returncode == 0, personal_local_context.stderr
     personal_local_context_payload = json.loads(personal_local_context.stdout)
-    assert personal_local_context_payload["worker"]["id"] == "mlx_gemma4_31b_it_4bit"
+    assert personal_local_context_payload["worker"]["id"] == MLX_MODEL_ID
     assert personal_local_context_payload["routing"]["fallback_reason"] == "local_context_needed"
 
     print("frontier harness reset tests passed")

@@ -1,0 +1,5 @@
+{
+  "name": "angella_mlx_local",
+  "base_url": "__ANGELLA_MLX_BASE_URL__",
+  "model": "__ANGELLA_MLX_MODEL__"
+}

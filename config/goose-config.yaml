@@ -66,6 +66,16 @@ extensions:
     timeout: 300
     description: "run-scoped transparency 로그와 final report 저장"
 
+  archivist-ops:
+    enabled: true
+    name: archivist-ops
+    type: stdio
+    cmd: __PYTHON_CMD__
+    args:
+      - "__ANGELLA_ROOT__/mcp-servers/archivist_ops.py"
+    timeout: 300
+    description: "Knowledge synthesis, distillation and health checks for LLM-Wiki"
+
 # --- Slash Commands (optional) ---
 slash_commands:
   - command: "autoresearch"

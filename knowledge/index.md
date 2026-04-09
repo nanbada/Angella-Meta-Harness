@@ -6,6 +6,7 @@ This file is the canonical entry point for tracked harness knowledge.
 
 - [knowledge/index.md](index.md)
 - [knowledge/log.md](log.md)
+- [knowledge/lessons.md](lessons.md)
 - [knowledge/sources/index.md](sources/index.md)
 - [docs/PARITY.md](../docs/PARITY.md)
 

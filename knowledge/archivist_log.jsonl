@@ -1,0 +1,8 @@
+{"timestamp": "2026-04-09T09:08:06.238915+00:00", "kind": "distill_source", "payload": {"raw": "knowledge/sources/raw/Local Personal Knowledge bases - Grok.md", "target": "knowledge/sources/source-external-local_personal_knowledge_bases_grok.md"}}
+{"timestamp": "2026-04-09T09:08:06.328007+00:00", "kind": "distill_source", "payload": {"raw": "knowledge/sources/raw/Local Personal Knowledge bases - ChatGPT.md", "target": "knowledge/sources/source-external-local_personal_knowledge_bases_chatgpt.md"}}
+{"timestamp": "2026-04-09T09:08:06.417414+00:00", "kind": "distill_source", "payload": {"raw": "knowledge/sources/raw/지금 가장 중요한 AI 아이디어들(2026 4월).md", "target": "knowledge/sources/source-external-지금_가장_중요한_ai_아이디어들_2026_4월.md"}}
+{"timestamp": "2026-04-09T09:08:37.978331+00:00", "kind": "health_check", "payload": {"missing_links_count": 3, "low_density_count": 0}}
+{"timestamp": "2026-04-09T09:28:08.931986+00:00", "kind": "distill_source", "payload": {"raw": "knowledge/sources/raw/Local Personal Knowledge bases - Grok.md", "target": "knowledge/sources/source-external-local-personal-knowledge-bases-grok.md"}}
+{"timestamp": "2026-04-09T09:28:09.020016+00:00", "kind": "distill_source", "payload": {"raw": "knowledge/sources/raw/Local Personal Knowledge bases - ChatGPT.md", "target": "knowledge/sources/source-external-local-personal-knowledge-bases-chatgpt.md"}}
+{"timestamp": "2026-04-09T09:28:09.106217+00:00", "kind": "distill_source", "payload": {"raw": "knowledge/sources/raw/지금 가장 중요한 AI 아이디어들(2026 4월).md", "target": "knowledge/sources/source-external-ai-2026-4.md"}}
+{"timestamp": "2026-04-09T09:39:01.500912+00:00", "kind": "distill_lessons", "payload": {"entries_processed": 4}}

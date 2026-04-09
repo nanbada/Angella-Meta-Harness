@@ -1,0 +1,19 @@
+# Dynamic Task Routing Logic
+# Assessment of task difficulty and worker selection
+
+assessment:
+  - id: "low_complexity"
+    criteria: "Single file edit, clear instruction, documentation only, or repetitive logic"
+    preferred_worker: "local_reasoning"
+  - id: "medium_complexity"
+    criteria: "Cross-file refactoring, new feature implementation with existing patterns"
+    preferred_worker: "frontier_cost_guarded"
+  - id: "high_complexity"
+    criteria: "Architectural changes, deep bug root-cause analysis, complex logical reasoning"
+    preferred_worker: "frontier_primary"
+
+fallback_strategy:
+  - if: "frontier_unreachable"
+    action: "fallback_to_local"
+  - if: "cost_guarded_active"
+    action: "optimize_for_token_efficiency"

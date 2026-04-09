@@ -49,23 +49,20 @@ Last updated: 2026-04-09
 - Status: implemented
 - Evidence: `mcp-servers/scion_coordination_ops.py`
 - Evidence: `recipes/autoresearch-loop.yaml`
-- Evidence: `knowledge/sops/scion-topology-and-scheduling.md`
 - Evidence: `scripts/test_scion_coordination.py`
 - Evidence: `docs/arch-snapshot.md`
-- Evidence: `docs/scion-operations.md`
 
-## Lane 7 — retired meta-loop surface removed
+## Lane 7 — retired meta-loop/control-plane surface removed
 
 - Status: implemented
 - Evidence: `config/goose-config.yaml`
 - Evidence: `.goosehints`
-- Evidence: `mcp-servers/control_plane.py` (restored for logging)
-- Evidence: `mcp-servers/meta_loop_ops.py` (restored for automation)
+- Evidence: `scripts/test_meta_loop_admin.py`
 
 ## Lane 8 — local worker stabilization (ollama + proxy)
 
 - Status: implemented
-- Evidence: `config/harness-models.yaml` (gemma4:26b-gguf)
+- Evidence: `config/harness-models.yaml`
 - Evidence: `scripts/ollama_proxy.py`
 - Evidence: `Modelfile.gemma4-gguf`
 - Evidence: `docs/setup-gemma4-ollama.md`
