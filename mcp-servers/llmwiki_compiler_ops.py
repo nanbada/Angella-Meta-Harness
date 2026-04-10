@@ -46,11 +46,18 @@ def _safe_note_stem(title: str) -> str:
     return stem
 
 
-def _note_path(title: str) -> Path:
-    sources_dir = _sources_dir()
-    path = (sources_dir / f"{_safe_note_stem(title)}.md").resolve()
-    if path.parent != sources_dir:
-        raise ValueError("Refusing to write outside knowledge/sources.")
+def _note_path(title: str, category: str = "sources") -> Path:
+    knowledge_dir = _knowledge_dir()
+    if category == "research":
+        target_dir = (knowledge_dir / "research").resolve()
+    else:
+        target_dir = (knowledge_dir / "sources").resolve()
+    
+    target_dir.mkdir(parents=True, exist_ok=True)
+    path = (target_dir / f"{_safe_note_stem(title)}.md").resolve()
+    
+    if not str(path).startswith(str(knowledge_dir)):
+        raise ValueError("Refusing to write outside knowledge directory.")
     return path
 
 
@@ -107,11 +114,12 @@ def handle_request(request: dict) -> dict:
     elif tool == "llmwiki_save_note":
         title = args.get("title")
         content = args.get("content")
+        category = args.get("category", "sources") # default to wiki sources
         if not title or not content:
             return {"error": "Missing 'title' or 'content' argument."}
 
         try:
-            file_path = _note_path(title)
+            file_path = _note_path(title, category=category)
         except ValueError as exc:
             return {"error": str(exc)}
 
@@ -120,7 +128,7 @@ def handle_request(request: dict) -> dict:
             "content": [
                 {
                     "type": "text",
-                    "text": f"Successfully saved note to {file_path}. Run llmwiki_compile to index it.",
+                    "text": f"Successfully saved note to {file_path}. Category: {category}",
                 }
             ]
         }
@@ -165,12 +173,13 @@ if __name__ == "__main__":
                 },
                 {
                     "name": "llmwiki_save_note",
-                    "description": "Saves raw text content (e.g. from clipboard or agent thoughts) directly as a new source file in the knowledge base.",
+                    "description": "Saves raw text content directly as a new source file in the knowledge base (wiki sources or research).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "title": {"type": "string", "description": "A descriptive title for the note."},
-                            "content": {"type": "string", "description": "The markdown content of the note."}
+                            "content": {"type": "string", "description": "The markdown content of the note."},
+                            "category": {"type": "string", "enum": ["sources", "research"], "description": "Category: 'sources' for wiki knowledge, 'research' for performance studies/external research."}
                         },
                         "required": ["title", "content"]
                     }

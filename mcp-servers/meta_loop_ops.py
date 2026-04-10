@@ -16,7 +16,10 @@ from control_plane import append_jsonl, ensure_control_plane_layout, run_dir, sa
 
 
 ANGELLA_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_LOG_ROOT = ANGELLA_ROOT / "logs" / "Meta-Harness Logs"
+TELEMETRY_DIR = ANGELLA_ROOT / "telemetry"
+LOGS_DIR = TELEMETRY_DIR / "logs"
+ERRORS_DIR = TELEMETRY_DIR / "errors"
+DEFAULT_LOG_ROOT = LOGS_DIR / "harness_activity"
 
 
 def _now_timestamp() -> str:
@@ -829,6 +832,7 @@ def finalize_accepted_meta_loop_run(
     pr_title: str = "",
     pr_summary: str = "",
     operator_confirmed: bool = False,
+    promote: bool = False,
     dry_run: bool = False,
     repo_root: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -841,12 +845,16 @@ def finalize_accepted_meta_loop_run(
         objective_component=objective_component,
         operator_confirmed=operator_confirmed,
     )
-    promotion_result = promote_knowledge_drafts(
-        run_id=run_id,
-        operator_confirmed=operator_confirmed,
-        dry_run=dry_run,
-        repo_root=repo_root,
-    )
+
+    promotion_result: dict[str, Any] = {"promoted": [], "skipped": [], "report_path": ""}
+    if promote:
+        promotion_result = promote_knowledge_drafts(
+            run_id=run_id,
+            operator_confirmed=operator_confirmed,
+            dry_run=dry_run,
+            repo_root=repo_root,
+        )
+
     promoted_targets = [item["target_path"] for item in promotion_result.get("promoted", [])]
     export_result = export_meta_loop_change(
         run_id,

@@ -19,6 +19,9 @@ KNOWLEDGE_DIR = PROJECT_ROOT / "knowledge"
 SOURCES_DIR = KNOWLEDGE_DIR / "sources"
 RAW_SOURCES_DIR = SOURCES_DIR / "raw"
 SOPS_DIR = KNOWLEDGE_DIR / "sops"
+RESEARCH_DIR = KNOWLEDGE_DIR / "research"
+TELEMETRY_DIR = PROJECT_ROOT / "telemetry"
+LOGS_DIR = TELEMETRY_DIR / "logs"
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -29,7 +32,8 @@ def _safe_note_stem(title: str) -> str:
     return stem.strip("-")
 
 def _record_event(kind: str, payload: dict[str, Any]) -> None:
-    log_file = KNOWLEDGE_DIR / "archivist_log.jsonl"
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = LOGS_DIR / "archivist_log.jsonl"
     event = {
         "timestamp": _utc_now().isoformat(),
         "kind": kind,

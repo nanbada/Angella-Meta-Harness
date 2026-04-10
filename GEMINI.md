@@ -8,7 +8,7 @@
     *   `angella-reviewer`: Benchmarking, Validation, Keep/Revert Decision.
     *   `angella-archivist`: Meta-Learning, Lesson Distillation.
 *   **Hand Interface**: Interact with the execution environment exclusively via the `angella-core` skill and MCP tools.
-*   **Session Evidence Store**: Treat `knowledge/log.md` as the recoverable event stream. Document every major state change (Keep/Revert/Fail).
+*   **Session Evidence Store**: Treat `telemetry/logs/harness_activity.md` as the recoverable event stream. Document every major state change (Keep/Revert/Fail).
 
 ## 2. STRATEGIC CONTEXT MANAGEMENT (TOKEN EFFICIENCY)
 *   **Minimalist Ingestion**: Never `read_file` an entire large file (>100 lines) without first using `grep_search` or `glob` to isolate points of interest.
@@ -24,7 +24,7 @@
 ## 3. TECHNICAL INTEGRITY & QUALITY
 *   **Type Safety**: Mandatory type hints for Python, strict typing for TypeScript. No `any` or `cast` unless justified.
 *   **Performance as a Default**: Algorithms must be evaluated for time/space complexity before implementation. Prefer vectorized operations (NumPy/Pandas) or async/concurrent patterns where beneficial.
-*   **Self-Improving Loop**: Every failure must be analyzed. Root causes and prevention rules must be documented in `knowledge/log.md` or `lessons.md` immediately.
+*   **Self-Improving Loop**: Every failure must be analyzed. Root causes and prevention rules must be documented in `telemetry/logs/harness_activity.md` or `lessons.md` immediately.
 
 ## 4. SECURITY & SYSTEM SAFETY
 *   **Credential Shielding**: Zero tolerance for printing or logging environment variables, `.env` files, or secrets.
