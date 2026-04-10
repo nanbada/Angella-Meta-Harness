@@ -101,12 +101,16 @@ fail_test() {
   exit 1
 }
 
-echo "[TEST] Starting setup flow tests..."
+log_step() {
+  echo "[TEST] $(date '+%Y-%m-%d %H:%M:%S') $1"
+}
+
+log_step "Starting setup flow tests..."
 
 CHECK_OUT="$TMP_ROOT/check.out"
 CHECK_ERR="$TMP_ROOT/check.err"
 
-echo "[TEST] Running setup --check..."
+log_step "Running setup --check..."
 (
   cd "$ROOT_DIR"
   HOME="$CHECK_HOME" bash setup.sh --check >"$CHECK_OUT" 2>"$CHECK_ERR"
@@ -115,7 +119,7 @@ echo "[TEST] Running setup --check..."
 grep -q "Template rendering checks passed" "$CHECK_OUT" || fail_test "missing expected success message in check.out"
 
 MODELS_OUT="$TMP_ROOT/models.out"
-echo "[TEST] Listing models..."
+log_step "Listing models..."
 (
   cd "$ROOT_DIR"
   HOME="$CHECK_HOME" bash setup.sh --list-models >"$MODELS_OUT" 2>&1
@@ -127,7 +131,7 @@ grep -q "$MLX_MODEL_ID: .*ANGELLA_LOCAL_WORKER_BACKEND=mlx" "$MODELS_OUT" || fai
 grep -q "$MLX_MODEL_ID: .*ANGELLA_MLX_BASE_URL" "$MODELS_OUT" || fail_test "MLX model base URL info missing"
 
 MLX_MODELS_OUT="$TMP_ROOT/mlx-models.out"
-echo "[TEST] Listing MLX models..."
+log_step "Listing MLX models..."
 (
   cd "$ROOT_DIR"
   HOME="$CHECK_HOME" \
@@ -141,7 +145,7 @@ grep -q "$MLX_MODEL_ID: .*provider=angella_mlx_local" "$MLX_MODELS_OUT" || fail_
 grep -q "$MLX_MODEL_ID: .*status=enabled" "$MLX_MODELS_OUT" || fail_test "MLX status not enabled"
 
 PROFILES_OUT="$TMP_ROOT/profiles.out"
-echo "[TEST] Listing harness profiles..."
+log_step "Listing harness profiles..."
 (
   cd "$ROOT_DIR"
   HOME="$CHECK_HOME" bash setup.sh --list-harness-profiles >"$PROFILES_OUT" 2>&1
@@ -150,7 +154,7 @@ grep -q "frontier_default: .*worker=openai_gpt_5_2" "$PROFILES_OUT" || fail_test
 grep -q "local_lab: .*worker=$OLLAMA_MODEL_ID" "$PROFILES_OUT" || fail_test "local_lab missing or incorrect worker"
 
 MLX_PROFILES_OUT="$TMP_ROOT/mlx-profiles.out"
-echo "[TEST] Listing MLX harness profiles..."
+log_step "Listing MLX harness profiles..."
 (
   cd "$ROOT_DIR"
   HOME="$CHECK_HOME" \
@@ -163,7 +167,7 @@ echo "[TEST] Listing MLX harness profiles..."
 ) || fail_test "setup --list-harness-profiles with MLX env failed"
 grep -q "local_lab: .*worker=$MLX_MODEL_ID" "$MLX_PROFILES_OUT" || fail_test "local_lab failed to resolve to MLX worker"
 
-echo "[TEST] Checking legacy profile error..."
+log_step "Checking legacy profile error..."
 LEGACY_PROFILE_ERR="$TMP_ROOT/legacy-profile.err"
 if (
   cd "$ROOT_DIR"
@@ -175,7 +179,7 @@ grep -q 'Legacy harness profile `default` has been removed' "$LEGACY_PROFILE_ERR
 
 MLX_CHECK_OUT="$TMP_ROOT/mlx-check.out"
 MLX_CHECK_ERR="$TMP_ROOT/mlx-check.err"
-echo "[TEST] Checking MLX worker resolution..."
+log_step "Checking MLX worker resolution..."
 (
   cd "$ROOT_DIR"
   HOME="$CHECK_HOME" \
@@ -189,7 +193,7 @@ grep -q "Template rendering checks passed" "$MLX_CHECK_OUT" || fail_test "MLX ch
 grep -q "worker: angella_mlx_local/$MLX_MODEL_NAME" "$MLX_CHECK_OUT" || fail_test "MLX worker resolution mismatch"
 
 MLX_FAIL_ERR="$TMP_ROOT/mlx-fail.err"
-echo "[TEST] Checking MLX worker failure..."
+log_step "Checking MLX worker failure..."
 if (
   cd "$ROOT_DIR"
   HOME="$CHECK_HOME" \
@@ -205,7 +209,7 @@ grep -q 'ANGELLA_LOCAL_WORKER_BACKEND=mlx and ANGELLA_MLX_BASE_URL' "$MLX_FAIL_E
 
 OLLAMA_CHECK_OUT="$TMP_ROOT/ollama-check.out"
 OLLAMA_CHECK_ERR="$TMP_ROOT/ollama-check.err"
-echo "[TEST] Checking Ollama worker resolution..."
+log_step "Checking Ollama worker resolution..."
 (
   cd "$ROOT_DIR"
   HOME="$CHECK_HOME" bash setup.sh --check --worker-model $OLLAMA_MODEL_ID >"$OLLAMA_CHECK_OUT" 2>"$OLLAMA_CHECK_ERR"
@@ -218,7 +222,7 @@ fi
 BOOTSTRAP_OUT="$TMP_ROOT/bootstrap.out"
 BOOTSTRAP_ERR="$TMP_ROOT/bootstrap.err"
 
-echo "[TEST] Running --bootstrap-only..."
+log_step "Running --bootstrap-only..."
 (
   cd "$ROOT_DIR"
   HOME="$BOOTSTRAP_HOME" bash setup.sh --bootstrap-only >"$BOOTSTRAP_OUT" 2>"$BOOTSTRAP_ERR"
@@ -233,7 +237,7 @@ grep -q "Bootstrap Complete" "$BOOTSTRAP_OUT" || fail_test "missing Bootstrap Co
 INSTALL_OUT="$TMP_ROOT/install.out"
 INSTALL_ERR="$TMP_ROOT/install.err"
 
-echo "[TEST] Running --install-only..."
+log_step "Running --install-only..."
 (
   cd "$ROOT_DIR"
   HOME="$INSTALL_HOME" bash setup.sh --install-only >"$INSTALL_OUT" 2>"$INSTALL_ERR"
@@ -251,7 +255,7 @@ MLX_INSTALL_HOME="$TMP_ROOT/home-install-mlx"
 mkdir -p "$MLX_INSTALL_HOME"
 MLX_INSTALL_OUT="$TMP_ROOT/install-mlx.out"
 MLX_INSTALL_ERR="$TMP_ROOT/install-mlx.err"
-echo "[TEST] Running MLX --install-only..."
+log_step "Running MLX --install-only..."
 (
   cd "$ROOT_DIR"
   HOME="$MLX_INSTALL_HOME" \
@@ -275,7 +279,7 @@ EOF
 
 AUTO_YES_OUT="$TMP_ROOT/auto-yes.out"
 AUTO_YES_ERR="$TMP_ROOT/auto-yes.err"
-echo "[TEST] Running --auto-yes overwrite..."
+log_step "Running --auto-yes overwrite..."
 (
   cd "$ROOT_DIR"
   HOME="$AUTO_YES_HOME" \
@@ -293,4 +297,4 @@ fi
 grep -qE "Goose config (installed to|updated)" "$AUTO_YES_OUT" || fail_test "missing config installation confirmation"
 grep -q "Rendered recipe installed to" "$AUTO_YES_OUT" || fail_test "missing recipe installation confirmation"
 
-echo "setup flow tests passed"
+log_step "setup flow tests passed"
