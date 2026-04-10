@@ -18,8 +18,7 @@ if command -v rg >/dev/null 2>&1; then
     --glob '!__pycache__/**' \
     --glob '!*.pyc' \
     --glob '!*.example' \
-    --glob '!.env.mlx' \
-    --glob '!.env.agents' \
+    --glob '!.env*' \
     --glob '!scripts/setup-vault.sh' \
     --glob '!*.sample' \
     --glob '!*.md' \
@@ -33,8 +32,7 @@ else
     --exclude-dir=__pycache__ \
     --exclude='*.pyc' \
     --exclude='*.example' \
-    --exclude='.env.mlx' \
-    --exclude='.env.agents' \
+    --exclude='.env*' \
     --exclude='setup-vault.sh' \
     --exclude='*.sample' \
     --exclude='*.md' \
