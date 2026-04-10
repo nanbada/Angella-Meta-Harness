@@ -19,6 +19,12 @@ OLLAMA_MODEL_NAME=$($PYTHON_BIN -c "import json; print(json.load(open('$VARS_JSO
 FAKE_BIN="$TMP_ROOT/bin"
 mkdir -p "$FAKE_BIN"
 
+# Diagnostic checks
+echo "DEBUG: PATH=$PATH"
+echo "DEBUG: python3=$(command -v python3 || echo 'not found')"
+echo "DEBUG: python=$(command -v python || echo 'not found')"
+echo "DEBUG: ROOT_DIR=$ROOT_DIR"
+
 # --- Mocking binaries ---
 REAL_CURL=$(command -v curl || echo "/usr/bin/curl")
 cat >"$FAKE_BIN/curl" <<EOF
@@ -84,6 +90,10 @@ fail_test() {
   echo -e "\n[ERROR] $msg" >&2
   if [ -f "$TMP_ROOT/check.out" ]; then echo "--- check.out ---"; cat "$TMP_ROOT/check.out"; fi
   if [ -f "$TMP_ROOT/check.err" ]; then echo "--- check.err ---"; cat "$TMP_ROOT/check.err"; fi
+  if [ -f "$TMP_ROOT/models.out" ]; then echo "--- models.out ---"; cat "$TMP_ROOT/models.out"; fi
+  if [ -f "$TMP_ROOT/profiles.out" ]; then echo "--- profiles.out ---"; cat "$TMP_ROOT/profiles.out"; fi
+  if [ -f "$TMP_ROOT/mlx-models.out" ]; then echo "--- mlx-models.out ---"; cat "$TMP_ROOT/mlx-models.out"; fi
+  if [ -f "$TMP_ROOT/mlx-profiles.out" ]; then echo "--- mlx-profiles.out ---"; cat "$TMP_ROOT/mlx-profiles.out"; fi
   exit 1
 }
 
@@ -104,7 +114,7 @@ MODELS_OUT="$TMP_ROOT/models.out"
 echo "[TEST] Listing models..."
 (
   cd "$ROOT_DIR"
-  HOME="$CHECK_HOME" bash setup.sh --list-models >"$MODELS_OUT" 2>/dev/null
+  HOME="$CHECK_HOME" bash setup.sh --list-models >"$MODELS_OUT" 2>&1
 ) || fail_test "setup --list-models failed"
 grep -q "google_gemini_2_5_pro" "$MODELS_OUT" || fail_test "google_gemini_2_5_pro missing in models list"
 grep -q "$OLLAMA_MODEL_ID" "$MODELS_OUT" || fail_test "$OLLAMA_MODEL_ID missing in models list"
@@ -121,7 +131,7 @@ echo "[TEST] Listing MLX models..."
   ANGELLA_MLX_BASE_URL=http://127.0.0.1:11435/v1 \
   ANGELLA_MLX_MODEL=$MLX_MODEL_NAME \
   ANGELLA_MLX_HEALTHCHECK_OK=1 \
-  bash setup.sh --list-models >"$MLX_MODELS_OUT" 2>/dev/null
+  bash setup.sh --list-models >"$MLX_MODELS_OUT" 2>&1
 ) || fail_test "setup --list-models with MLX env failed"
 grep -q "$MLX_MODEL_ID: .*provider=angella_mlx_local" "$MLX_MODELS_OUT" || fail_test "MLX provider info missing in list"
 grep -q "$MLX_MODEL_ID: .*status=enabled" "$MLX_MODELS_OUT" || fail_test "MLX status not enabled"
@@ -130,7 +140,7 @@ PROFILES_OUT="$TMP_ROOT/profiles.out"
 echo "[TEST] Listing harness profiles..."
 (
   cd "$ROOT_DIR"
-  HOME="$CHECK_HOME" bash setup.sh --list-harness-profiles >"$PROFILES_OUT" 2>/dev/null
+  HOME="$CHECK_HOME" bash setup.sh --list-harness-profiles >"$PROFILES_OUT" 2>&1
 ) || fail_test "setup --list-harness-profiles failed"
 grep -q "frontier_default: .*worker=openai_gpt_5_2" "$PROFILES_OUT" || fail_test "frontier_default missing or incorrect worker"
 grep -q "local_lab: .*worker=$OLLAMA_MODEL_ID" "$PROFILES_OUT" || fail_test "local_lab missing or incorrect worker"
@@ -145,7 +155,7 @@ echo "[TEST] Listing MLX harness profiles..."
   ANGELLA_MLX_MODEL=$MLX_MODEL_NAME \
   ANGELLA_MLX_HEALTHCHECK_OK=1 \
   ANGELLA_OLLAMA_TAGS_JSON="" \
-  bash setup.sh --list-harness-profiles >"$MLX_PROFILES_OUT" 2>/dev/null
+  bash setup.sh --list-harness-profiles >"$MLX_PROFILES_OUT" 2>&1
 ) || fail_test "setup --list-harness-profiles with MLX env failed"
 grep -q "local_lab: .*worker=$MLX_MODEL_ID" "$MLX_PROFILES_OUT" || fail_test "local_lab failed to resolve to MLX worker"
 
