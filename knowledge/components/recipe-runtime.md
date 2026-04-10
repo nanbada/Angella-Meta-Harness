@@ -4,7 +4,7 @@ Generated from control-plane evidence and tracked harness knowledge.
 
 ## Contract
 
-- benchmark command: `/Users/nanbada/projects/Angella/.cache/angella/bootstrap-venv/bin/python scripts/test_harness_self_optimize_adapter.py`
+- benchmark command: `./.cache/angella/bootstrap-venv/bin/python scripts/test_harness_self_optimize_adapter.py`
 - success signal: adapter benchmark completes and the recipe exits via accepted, revert, or verification-only
 - metric key: `build_time`
 

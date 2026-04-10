@@ -4,7 +4,7 @@ Generated from control-plane evidence and tracked harness knowledge.
 
 ## Contract
 
-- benchmark command: `/Users/nanbada/projects/Angella/.cache/angella/bootstrap-venv/bin/python scripts/harness_catalog.py list-profiles`
+- benchmark command: `./.cache/angella/bootstrap-venv/bin/python scripts/harness_catalog.py list-profiles`
 - success signal: profile listing exits 0 and default worker resolves to Gemma4
 - metric key: `build_time`
 

@@ -16,7 +16,7 @@ This document describes the current structural design of the Angella installer.
 
 ### Stage 1: Bootstrap
 
-Handled by [`scripts/setup-bootstrap.sh`](/Users/nanbada/projects/Angella/scripts/setup-bootstrap.sh).
+Handled by [`scripts/setup-bootstrap.sh`](../../scripts/setup-bootstrap.sh).
 
 Responsibilities:
 - runtime tool checks (`brew`, `goose`, local fallback runtimes when selected)
@@ -29,7 +29,7 @@ Responsibilities:
 
 ### Stage 2: Install
 
-Handled by [`scripts/setup-install.sh`](/Users/nanbada/projects/Angella/scripts/setup-install.sh).
+Handled by [`scripts/setup-install.sh`](../../scripts/setup-install.sh).
 
 Responsibilities:
 - load `.env.mlx` or `.env.mlx.example`
@@ -45,7 +45,7 @@ Responsibilities:
 
 ## User entrypoints
 
-The main entrypoint remains [`setup.sh`](/Users/nanbada/projects/Angella/setup.sh).
+The main entrypoint remains [`setup.sh`](../../setup.sh).
 
 Supported modes:
 - `bash setup.sh --check`
@@ -75,8 +75,8 @@ The current install preference order is:
 
 The harness catalog is stored in:
 
-- [`config/harness-models.yaml`](/Users/nanbada/projects/Angella/config/harness-models.yaml)
-- [`config/harness-profiles.yaml`](/Users/nanbada/projects/Angella/config/harness-profiles.yaml)
+- [`config/harness-models.yaml`](../../config/harness-models.yaml)
+- [`config/harness-profiles.yaml`](../../config/harness-profiles.yaml)
 
 `scripts/harness_catalog.py` resolves:
 - which lead model to use
@@ -211,7 +211,7 @@ Passing `max_age_days > 0` to prune overrides these defaults uniformly.
 
 Tracked harness wiki behavior is configured in:
 
-- [`config/knowledge-policy.yaml`](/Users/nanbada/projects/Angella/config/knowledge-policy.yaml)
+- [`config/knowledge-policy.yaml`](../../config/knowledge-policy.yaml)
 
 The first implementation uses:
 
@@ -225,9 +225,9 @@ The first implementation uses:
 
 Behavioral product truth is tracked separately from handoff notes:
 
-- [`PARITY.md`](/Users/nanbada/projects/Angella/PARITY.md)
-- [`scripts/harness_parity_scenarios.json`](/Users/nanbada/projects/Angella/scripts/harness_parity_scenarios.json)
-- [`scripts/run_harness_parity_diff.py`](/Users/nanbada/projects/Angella/scripts/run_harness_parity_diff.py)
+- [`PARITY.md`](../../PARITY.md)
+- [`scripts/harness_parity_scenarios.json`](../../scripts/harness_parity_scenarios.json)
+- [`scripts/run_harness_parity_diff.py`](../../scripts/run_harness_parity_diff.py)
 
 CI and local regression paths should fail when `PARITY.md` and the scenario map drift.
 

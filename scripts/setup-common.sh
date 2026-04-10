@@ -187,7 +187,7 @@ write_shell_var() {
 verify_template_source_portable() {
     local template_path=$1
 
-    if grep -Fq '/Users/nanbada/projects/Angella' "$template_path"; then
+    if grep -Ei "(/Users/[^/]+/projects/Angella|/Users/nanbada/projects/Angella)" "$template_path" > /dev/null; then
         fail "Developer-specific absolute path is hardcoded in template source: $template_path"
         return 1
     fi

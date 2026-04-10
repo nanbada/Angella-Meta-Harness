@@ -3,15 +3,15 @@
 ## Local secrets
 
 - Do not commit `.env`, `.env.*`, private keys, certificates, or local-only model files.
-- Use [`.env.mlx.example`](/Users/nanbada/projects/Angella/.env.mlx.example) as the tracked template and keep the real `.env.mlx` local only.
+- Use [`.env.mlx.example`](.env.mlx.example) as the tracked template and keep the real `.env.mlx` local only.
 - `reference.md` is treated as a local-only scratch file and is ignored.
 
 ## Local safeguards
 
-- Secret scanning script: [`scripts/check-secrets.sh`](/Users/nanbada/projects/Angella/scripts/check-secrets.sh)
-- Commit hook entrypoint: [`.githooks/pre-commit`](/Users/nanbada/projects/Angella/.githooks/pre-commit)
-- Hook installer: [`scripts/install-hooks.sh`](/Users/nanbada/projects/Angella/scripts/install-hooks.sh)
-- CI checks: [`.github/workflows/repo-checks.yml`](/Users/nanbada/projects/Angella/.github/workflows/repo-checks.yml)
+- Secret scanning script: [`scripts/check-secrets.sh`](scripts/check-secrets.sh)
+- Commit hook entrypoint: [`.githooks/pre-commit`](.githooks/pre-commit)
+- Hook installer: [`scripts/install-hooks.sh`](scripts/install-hooks.sh)
+- CI checks: [`.github/workflows/repo-checks.yml`](.github/workflows/repo-checks.yml)
 
 To enable the repository-local hooks:
 
