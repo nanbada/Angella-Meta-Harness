@@ -19,7 +19,7 @@ This wiki is the tracked knowledge layer that sits between raw control-plane evi
 - `knowledge/index.md`
   - content-oriented entrypoint
   - read first when searching broadly
-- `knowledge/log.md`
+- `telemetry/logs/harness_activity.md`
   - chronological entrypoint
   - read when recent changes matter
 - `knowledge/sources/index.md`
@@ -66,7 +66,7 @@ This wiki is the tracked knowledge layer that sits between raw control-plane evi
 
 ## Log Rules
 
-- `knowledge/log.md` is append-only
+- `telemetry/logs/harness_activity.md` is append-only
 - each event should use a stable marker so sync is idempotent
 - event kinds:
   - accepted

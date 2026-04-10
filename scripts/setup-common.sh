@@ -754,6 +754,7 @@ print_summary() {
     echo "     wheelhouse: $ANGELLA_WHEELHOUSE_DIR"
     echo ""
     echo "  Logs:"
-    echo "     $SCRIPT_DIR/knowledge/log.md (Event Stream)"
+    echo "     $SCRIPT_DIR/telemetry/logs/harness_activity.md (Event Stream)"
+
     echo ""
 }

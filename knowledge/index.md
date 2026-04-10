@@ -5,7 +5,7 @@ This file is the canonical entry point for tracked harness knowledge.
 ## Entry Points
 
 - [knowledge/index.md](index.md)
-- [knowledge/log.md](log.md)
+- [telemetry/logs/harness_activity.md](../telemetry/logs/harness_activity.md)
 - [knowledge/lessons.md](lessons.md)
 - [knowledge/sources/index.md](sources/index.md)
 - [docs/PARITY.md](../docs/PARITY.md)

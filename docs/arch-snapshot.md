@@ -5,7 +5,7 @@
 ## 1. 아키텍처 패러다임 전환 (Meta-Harness)
 - **Brain/Hand Decoupling**: Anthropic의 Meta-Harness 철학을 계승하여, 추론을 담당하는 **Brains**(.gemini/agents)와 실행을 담당하는 **Hands**(.gemini/skills + mcp-servers)를 완전히 분리했습니다.
 - **Supervisor Orchestration**: 메인 Gemini 세션(Supervisor)이 복잡한 작업을 연구(Researcher), 구현(Implementer), 검증(Reviewer), 기록(Archivist) 에이전트에게 전략적으로 위임합니다.
-- **Session Evidence Store**: `knowledge/log.md`를 단순한 텍스트 로그가 아닌, 복구 가능한 실행 이력(Append-only Event Stream)으로 취급합니다.
+- **Session Evidence Store**: `telemetry/logs/harness_activity.md`를 단순한 텍스트 로그가 아닌, 복구 가능한 실행 이력(Append-only Event Stream)으로 취급합니다.
 
 ## 2. 하드웨어 및 모델 정책 (Gemma 4 + Ollama)
 - **대상 하드웨어**: MacBook Pro M3 Pro (36GB RAM 권장)
