@@ -88,6 +88,10 @@ export ANGELLA_CONTROL_INSTALL_TELEMETRY_PATH="$ANGELLA_CACHE_DIR/control-plane/
 fail_test() {
   local msg=$1
   echo -e "\n[ERROR] $msg" >&2
+  echo "--- ENVIRONMENT (ANGELLA_*) ---"
+  env | grep ANGELLA || true
+  echo "--- DIRECTORY STRUCTURE ($TMP_ROOT) ---"
+  ls -R "$TMP_ROOT"
   if [ -f "$TMP_ROOT/check.out" ]; then echo "--- check.out ---"; cat "$TMP_ROOT/check.out"; fi
   if [ -f "$TMP_ROOT/check.err" ]; then echo "--- check.err ---"; cat "$TMP_ROOT/check.err"; fi
   if [ -f "$TMP_ROOT/models.out" ]; then echo "--- models.out ---"; cat "$TMP_ROOT/models.out"; fi

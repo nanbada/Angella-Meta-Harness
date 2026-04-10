@@ -24,7 +24,10 @@ FRONTIER_PROVIDERS = {"google", "anthropic", "openai"}
 
 
 def load_json_yaml(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 def _bool_env(name: str) -> bool:
