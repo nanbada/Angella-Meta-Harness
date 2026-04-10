@@ -14,6 +14,11 @@ TARGET_FILES = [
     "docs/setup-gemma4-mlx.md",
     "docs/setup-gemma4-ollama.md",
     ".env.mlx.example",
+    ".gemini/agents/angella-researcher.md",
+    ".gemini/agents/angella-implementer.md",
+    ".gemini/agents/angella-reviewer.md",
+    ".gemini/agents/angella-archivist.md",
+    ".gemini/skills/angella-core.md",
 ]
 
 def sync_file(file_path: Path, variables: dict[str, str]) -> None:
