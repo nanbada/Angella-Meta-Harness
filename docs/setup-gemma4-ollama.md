@@ -12,7 +12,7 @@
 ## 1. 기본 설치
 
 ```bash
-git clone https://github.com/nanbada/Angella.git
+git clone https://github.com/nanbada/Angella-Meta-Harness.git
 cd Angella
 
 bash setup.sh --check
