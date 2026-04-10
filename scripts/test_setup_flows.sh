@@ -14,9 +14,7 @@ OLLAMA_MODEL_NAME=$(python3 -c "import json; print(json.load(open('$VARS_JSON'))
 FAKE_BIN="$TMP_ROOT/bin"
 mkdir -p "$FAKE_BIN"
 
-REAL_PYTHON="$(command -v python3)"
-
-# --- Mocking curl for setup check ---
+# --- Mocking binaries ---
 cat >"$FAKE_BIN/curl" <<EOF
 #!/usr/bin/env bash
 if [[ "\$*" == *"localhost:11434/api/tags"* ]]; then
@@ -35,6 +33,24 @@ exec curl "\$@"
 EOF
 chmod +x "$FAKE_BIN/curl"
 
+cat >"$FAKE_BIN/brew" <<EOF
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$FAKE_BIN/brew"
+
+cat >"$FAKE_BIN/goose" <<EOF
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$FAKE_BIN/goose"
+
+cat >"$FAKE_BIN/ollama" <<EOF
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$FAKE_BIN/ollama"
+
 export PATH="$FAKE_BIN:$PATH"
 
 CHECK_HOME="$TMP_ROOT/home-check"
@@ -51,9 +67,11 @@ export "$OPENAI_KEY_NAME"="test-openai-key"
 export "$ANTHROPIC_KEY_NAME"="test-anthropic-key"
 export ANGELLA_OLLAMA_TAGS_JSON="{\"models\":[{\"name\":\"$OLLAMA_MODEL_NAME\"}]}"
 
-# Required for installation tests
-export ANGELLA_CONTROL_INSTALL_SUMMARY_PATH="$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
-export ANGELLA_CONTROL_INSTALL_TELEMETRY_PATH="$ROOT_DIR/.cache/angella/control-plane/install/telemetry.jsonl"
+# Use temporary cache directory for tests
+export ANGELLA_CACHE_DIR="$TMP_ROOT/cache"
+mkdir -p "$ANGELLA_CACHE_DIR"
+export ANGELLA_CONTROL_INSTALL_SUMMARY_PATH="$ANGELLA_CACHE_DIR/control-plane/install/summary.json"
+export ANGELLA_CONTROL_INSTALL_TELEMETRY_PATH="$ANGELLA_CACHE_DIR/control-plane/install/telemetry.jsonl"
 
 echo "[TEST] Starting setup flow tests..."
 
@@ -180,10 +198,10 @@ echo "[TEST] Running --bootstrap-only..."
   HOME="$BOOTSTRAP_HOME" bash setup.sh --bootstrap-only >"$BOOTSTRAP_OUT" 2>"$BOOTSTRAP_ERR"
 )
 
-test -f "$ROOT_DIR/.cache/angella/bootstrap.env"
-test -f "$ROOT_DIR/.cache/angella/bootstrap-venv/bin/python"
-grep -q "ANGELLA_HARNESS_PROFILE_ID=.*frontier_default" "$ROOT_DIR/.cache/angella/bootstrap.env"
-grep -q "ANGELLA_EXECUTION_MODE=.*frontier_primary" "$ROOT_DIR/.cache/angella/bootstrap.env"
+test -f "$ANGELLA_CACHE_DIR/bootstrap.env"
+test -f "$ANGELLA_CACHE_DIR/bootstrap-venv/bin/python"
+grep -q "ANGELLA_HARNESS_PROFILE_ID=.*frontier_default" "$ANGELLA_CACHE_DIR/bootstrap.env"
+grep -q "ANGELLA_EXECUTION_MODE=.*frontier_primary" "$ANGELLA_CACHE_DIR/bootstrap.env"
 grep -q "Bootstrap Complete" "$BOOTSTRAP_OUT"
 
 INSTALL_OUT="$TMP_ROOT/install.out"
@@ -197,10 +215,10 @@ echo "[TEST] Running --install-only..."
 
 test -f "$INSTALL_HOME/.config/goose/config.yaml"
 test -f "$INSTALL_HOME/.config/goose/recipes/autoresearch-loop.yaml"
-test -f "$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
-test -f "$ROOT_DIR/.cache/angella/control-plane/install/telemetry.jsonl"
-grep -q '"rendered_hashes"' "$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
-grep -q '"overwrite_mode": "installed_new"' "$ROOT_DIR/.cache/angella/control-plane/install/summary.json"
+test -f "$ANGELLA_CACHE_DIR/control-plane/install/summary.json"
+test -f "$ANGELLA_CACHE_DIR/control-plane/install/telemetry.jsonl"
+grep -q '"rendered_hashes"' "$ANGELLA_CACHE_DIR/control-plane/install/summary.json"
+grep -q '"overwrite_mode": "installed_new"' "$ANGELLA_CACHE_DIR/control-plane/install/summary.json"
 grep -q "Setup Complete" "$INSTALL_OUT"
 
 MLX_INSTALL_HOME="$TMP_ROOT/home-install-mlx"
