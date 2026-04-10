@@ -33,8 +33,8 @@ def sync_file(file_path: Path, variables: dict[str, str]) -> None:
         content = pattern_bash.sub(rf"\g<1>{value}\g<2>", content)
         
         # 3. Command line arguments: ... --flag value # AUTO_SYNC:KEY
-        pattern_cmd = re.compile(rf"(?<=\s)([^=\s]+)( # AUTO_SYNC:{key})$", flags=re.MULTILINE)
-        content = pattern_cmd.sub(rf"{value}\g<2>", content)
+        pattern_cmd = re.compile(rf"(--[\w-]+[= ])([^=\s]+)( # AUTO_SYNC:{key})$", flags=re.MULTILINE)
+        content = pattern_cmd.sub(rf"\g<1>{value}\g<3>", content)
 
     file_path.write_text(content, encoding="utf-8")
     print(f"Synced {file_path.name}")
