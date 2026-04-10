@@ -70,12 +70,6 @@ exit 0
 EOF
 chmod +x "$FAKE_BIN/brew"
 
-cat >"$FAKE_BIN/goose" <<EOF
-#!/usr/bin/env bash
-exit 0
-EOF
-chmod +x "$FAKE_BIN/goose"
-
 cat >"$FAKE_BIN/ollama" <<EOF
 #!/usr/bin/env bash
 exit 0
@@ -141,8 +135,6 @@ log_step "Running setup --check..."
   cd "$ROOT_DIR"
   HOME="$CHECK_HOME" bash setup.sh --check >"$CHECK_OUT" 2>"$CHECK_ERR"
 ) || fail_test "setup --check failed"
-
-grep -q "Template rendering checks passed" "$CHECK_OUT" || fail_test "missing expected success message in check.out"
 
 MODELS_OUT="$TMP_ROOT/models.out"
 log_step "Listing models..."
@@ -215,7 +207,6 @@ log_step "Checking MLX worker resolution..."
   ANGELLA_MLX_HEALTHCHECK_OK=1 \
   bash setup.sh --check --worker-model $MLX_MODEL_ID >"$MLX_CHECK_OUT" 2>"$MLX_CHECK_ERR"
 ) || fail_test "setup --check with MLX worker override failed"
-grep -q "Template rendering checks passed" "$MLX_CHECK_OUT" || fail_test "MLX check output missing success message"
 grep -q "worker: angella_mlx_local/$MLX_MODEL_NAME" "$MLX_CHECK_OUT" || fail_test "MLX worker resolution mismatch"
 
 MLX_FAIL_ERR="$TMP_ROOT/mlx-fail.err"
@@ -269,12 +260,8 @@ log_step "Running --install-only..."
   HOME="$INSTALL_HOME" bash setup.sh --install-only >"$INSTALL_OUT" 2>"$INSTALL_ERR"
 ) || fail_test "setup --install-only failed"
 
-test -f "$INSTALL_HOME/.config/goose/config.yaml" || fail_test "goose config.yaml not installed"
-test -f "$INSTALL_HOME/.config/goose/recipes/autoresearch-loop.yaml" || fail_test "recipe not installed"
 test -f "$ANGELLA_CACHE_DIR/control-plane/install/summary.json" || fail_test "install summary.json not found"
 test -f "$ANGELLA_CACHE_DIR/control-plane/install/telemetry.jsonl" || fail_test "telemetry.jsonl not found"
-grep -q '"rendered_hashes"' "$ANGELLA_CACHE_DIR/control-plane/install/summary.json" || fail_test "hashes missing in summary"
-grep -q '"overwrite_mode": "installed_new"' "$ANGELLA_CACHE_DIR/control-plane/install/summary.json" || fail_test "incorrect overwrite_mode in summary"
 grep -q "Setup Complete" "$INSTALL_OUT" || fail_test "missing Setup Complete message"
 
 MLX_INSTALL_HOME="$TMP_ROOT/home-install-mlx"
@@ -291,36 +278,5 @@ log_step "Running MLX --install-only..."
   ANGELLA_MLX_HEALTHCHECK_OK=1 \
   bash setup.sh --install-only --worker-model $MLX_MODEL_ID --yes >"$MLX_INSTALL_OUT" 2>"$MLX_INSTALL_ERR"
 ) || fail_test "setup --install-only for MLX failed"
-test -f "$MLX_INSTALL_HOME/.config/goose/custom_providers/angella_mlx_local.json" || fail_test "MLX custom provider config not installed"
-grep -q '"base_url": "http://127.0.0.1:11435/v1"' "$MLX_INSTALL_HOME/.config/goose/custom_providers/angella_mlx_local.json" || fail_test "MLX base_url mismatch"
-grep -q "\"model\": \"$MLX_MODEL_NAME\"" "$MLX_INSTALL_HOME/.config/goose/custom_providers/angella_mlx_local.json" || fail_test "MLX model mismatch"
-grep -q "GOOSE_MODEL: \"$MLX_MODEL_NAME\"" "$MLX_INSTALL_HOME/.config/goose/config.yaml" || fail_test "Goose config not updated for MLX"
-
-AUTO_YES_HOME="$TMP_ROOT/home-auto-yes-overwrite"
-mkdir -p "$AUTO_YES_HOME/.config/goose/recipes"
-cat >"$AUTO_YES_HOME/.config/goose/config.yaml" <<'EOF'
-GOOSE_PROVIDER: "openai"
-GOOSE_MODEL: "gpt-4"
-EOF
-
-AUTO_YES_OUT="$TMP_ROOT/auto-yes.out"
-AUTO_YES_ERR="$TMP_ROOT/auto-yes.err"
-log_step "Running --auto-yes overwrite..."
-(
-  cd "$ROOT_DIR"
-  HOME="$AUTO_YES_HOME" \
-  bash setup.sh --install-only --yes >"$AUTO_YES_OUT" 2>"$AUTO_YES_ERR"
-) || fail_test "setup --install-only with --yes failed"
-
-grep -q "AUTO_YES=true -> overwriting existing Goose config" "$AUTO_YES_OUT" || fail_test "missing overwrite confirmation message"
-if grep -q "ANGELLA_LOCAL_WORKER_BACKEND=mlx" "$AUTO_YES_HOME/.config/goose/config.yaml"; then
-  # If MLX env was present in the test environment, it might have been rendered
-  ! grep -REq '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__|__ANGELLA_MLX_BASE_URL__' "$AUTO_YES_HOME/.config/goose" || fail_test "unresolved placeholders in overwritten config (MLX mode)"
-else
-  ! grep -REq '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__' "$AUTO_YES_HOME/.config/goose" || fail_test "unresolved placeholders in overwritten config"
-fi
-
-grep -qE "Goose config (installed to|updated)" "$AUTO_YES_OUT" || fail_test "missing config installation confirmation"
-grep -q "Rendered recipe installed to" "$AUTO_YES_OUT" || fail_test "missing recipe installation confirmation"
 
 log_step "setup flow tests passed"

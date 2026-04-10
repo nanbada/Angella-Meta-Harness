@@ -10,7 +10,6 @@ source "$ROOT_DIR/scripts/setup-common.sh"
 load_mlx_environment false
 
 check_homebrew
-ensure_goose
 detect_python_runtime
 
 if [ "$CHECK_ONLY" = true ]; then

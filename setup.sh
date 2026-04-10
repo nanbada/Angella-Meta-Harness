@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# Angella — M3 Autoresearch Self-Optimize Loop Setup
+# Angella — M3 Autoresearch Meta-Harness Setup
 # ============================================================
 # Usage:
 #   bash setup.sh
@@ -26,10 +26,6 @@ LEAD_MODEL_OVERRIDE=""
 PLANNER_MODEL_OVERRIDE=""
 WORKER_MODEL_OVERRIDE=""
 
-cleanup() {
-    cleanup_check_render_dir
-}
-
 usage() {
     cat <<EOF
 Usage: bash setup.sh [--yes] [--check] [--bootstrap-only] [--install-only]
@@ -39,7 +35,7 @@ Usage: bash setup.sh [--yes] [--check] [--bootstrap-only] [--install-only]
 
 Options:
   --yes             Prompt 없이 기본값으로 설치를 진행합니다.
-  --check           설치 없이 의존성/템플릿 상태만 검증합니다.
+  --check           설치 없이 의존성 상태만 검증합니다.
   --bootstrap-only  Runtime/toolchain/bootstrap env 준비까지만 수행합니다.
   --install-only    기존 bootstrap env를 사용해 설치 단계만 수행합니다.
   --list-models     Catalog에 등록된 model과 enabled/disabled reason을 출력합니다.
@@ -128,7 +124,6 @@ parse_args() {
 source "$SCRIPT_DIR/scripts/setup-common.sh"
 
 parse_args "$@"
-trap cleanup EXIT
 
 print_banner
 export AUTO_YES CHECK_ONLY BOOTSTRAP_ONLY INSTALL_ONLY

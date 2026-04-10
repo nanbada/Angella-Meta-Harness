@@ -12,12 +12,12 @@
     },
     {
       "id": 2,
-      "title": "install-only drift overwrite",
+      "title": "install-only drift detection",
       "status": "implemented",
       "evidence": [
         "scripts/setup-install.sh",
         "scripts/test_setup_flows.sh",
-        "config/goose-config.yaml"
+        "config/project-vars.json"
       ]
     },
     {
@@ -32,12 +32,12 @@
     },
     {
       "id": 4,
-      "title": "multi-tier personal agent & llm-wiki integration",
+      "title": "meta-harness brain/hand decoupling",
       "status": "implemented",
       "evidence": [
-        "recipes/personal-agent-loop.yaml",
+        ".gemini/agents/angella-researcher.md",
+        ".gemini/skills/angella-core.md",
         "mcp-servers/llmwiki_compiler_ops.py",
-        "mcp-servers/personal_context_ops.py",
         "scripts/test_harness_knowledge.py"
       ]
     },
@@ -56,19 +56,19 @@
       "status": "implemented",
       "evidence": [
         "mcp-servers/scion_coordination_ops.py",
-        "recipes/autoresearch-loop.yaml",
         "scripts/test_scion_coordination.py",
         "docs/arch-snapshot.md"
       ]
     },
     {
       "id": 7,
-      "title": "retired meta-loop/control-plane surface removed",
+      "title": "dedicated agent specialized delegation",
       "status": "implemented",
       "evidence": [
-        "config/goose-config.yaml",
-        ".goosehints",
-        "scripts/test_meta_loop_admin.py"
+        ".gemini/agents/angella-implementer.md",
+        ".gemini/agents/angella-reviewer.md",
+        ".gemini/agents/angella-archivist.md",
+        "GEMINI.md"
       ]
     },
     {

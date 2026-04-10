@@ -7,11 +7,6 @@ if [ -z "${ANGELLA_ROOT:-}" ]; then
 fi
 
 SCRIPT_DIR="$ANGELLA_ROOT"
-GOOSE_CONFIG_DIR="${HOME}/.config/goose"
-GOOSE_RECIPE_DIR="${GOOSE_CONFIG_DIR}/recipes"
-RENDERED_CONFIG_PATH="${GOOSE_CONFIG_DIR}/config.yaml"
-RENDERED_RECIPE_PATH="${GOOSE_RECIPE_DIR}/autoresearch-loop.yaml"
-RENDERED_SUB_RECIPE_DIR="${GOOSE_RECIPE_DIR}/sub"
 
 ANGELLA_CACHE_DIR="${ANGELLA_CACHE_DIR:-${SCRIPT_DIR}/.cache/angella}"
 ANGELLA_BOOTSTRAP_VENV_DIR="${ANGELLA_BOOTSTRAP_VENV_DIR:-${ANGELLA_CACHE_DIR}/bootstrap-venv}"
@@ -29,7 +24,6 @@ ANGELLA_CONTROL_META_LOOP_DIR="${ANGELLA_CONTROL_META_LOOP_DIR:-${ANGELLA_CONTRO
 ANGELLA_CONTROL_INSTALL_DIR="${ANGELLA_CONTROL_INSTALL_DIR:-${ANGELLA_CONTROL_PLANE_DIR}/install}"
 ANGELLA_CONTROL_INSTALL_SUMMARY_PATH="${ANGELLA_CONTROL_INSTALL_SUMMARY_PATH:-${ANGELLA_CONTROL_INSTALL_DIR}/summary.json}"
 ANGELLA_CONTROL_INSTALL_TELEMETRY_PATH="${ANGELLA_CONTROL_INSTALL_TELEMETRY_PATH:-${ANGELLA_CONTROL_INSTALL_DIR}/telemetry.jsonl}"
-ANGELLA_CUSTOM_PROVIDER_DIR="${ANGELLA_CUSTOM_PROVIDER_DIR:-${GOOSE_CONFIG_DIR}/custom_providers}"
 ANGELLA_HARNESS_MODELS_PATH="${ANGELLA_HARNESS_MODELS_PATH:-${SCRIPT_DIR}/config/harness-models.yaml}"
 ANGELLA_HARNESS_PROFILES_PATH="${ANGELLA_HARNESS_PROFILES_PATH:-${SCRIPT_DIR}/config/harness-profiles.yaml}"
 
@@ -79,11 +73,7 @@ ANGELLA_LOCAL_CACHE_ENABLED="${ANGELLA_LOCAL_CACHE_ENABLED:-false}"
 ANGELLA_TOKEN_SAVER_ENABLED="${ANGELLA_TOKEN_SAVER_ENABLED:-false}"
 ANGELLA_NON_GOALS_JSON="${ANGELLA_NON_GOALS_JSON:-[]}"
 ANGELLA_MLX_POLICY_JSON="${ANGELLA_MLX_POLICY_JSON:-{}}"
-ANGELLA_INSTALL_RENDERED_HASHES_JSON="${ANGELLA_INSTALL_RENDERED_HASHES_JSON:-{}}"
-ANGELLA_INSTALL_PREEXISTING_HASHES_JSON="${ANGELLA_INSTALL_PREEXISTING_HASHES_JSON:-{}}"
-ANGELLA_INSTALL_APPLIED_HASHES_JSON="${ANGELLA_INSTALL_APPLIED_HASHES_JSON:-{}}"
 ANGELLA_INSTALL_DRIFT_DETECTED="${ANGELLA_INSTALL_DRIFT_DETECTED:-false}"
-ANGELLA_INSTALL_DRIFT_TARGETS_JSON="${ANGELLA_INSTALL_DRIFT_TARGETS_JSON:-[]}"
 ANGELLA_INSTALL_OVERWRITE_MODE="${ANGELLA_INSTALL_OVERWRITE_MODE:-not_run}"
 
 RED='\033[0;31m'
@@ -96,12 +86,6 @@ info()  { echo -e "${CYAN}[INFO]${NC} $1"; }
 ok()    { echo -e "${GREEN}[OK]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 fail()  { echo -e "${RED}[FAIL]${NC} $1"; }
-
-cleanup_check_render_dir() {
-    if [ -n "${CHECK_RENDER_DIR:-}" ] && [ -d "${CHECK_RENDER_DIR:-}" ]; then
-        rm -rf "$CHECK_RENDER_DIR"
-    fi
-}
 
 prompt_yes_no() {
     local prompt=$1
@@ -138,53 +122,6 @@ prompt_yes_no() {
                 ;;
         esac
     done
-}
-
-json_array_from_args() {
-    "$PYTHON_CMD" - "$@" <<'PY'
-import json
-import sys
-
-print(json.dumps(sys.argv[1:], ensure_ascii=False))
-PY
-}
-
-hash_dict_json() {
-    "$PYTHON_CMD" - "$@" <<'PY'
-import hashlib
-import json
-import pathlib
-import sys
-
-args = sys.argv[1:]
-payload = {}
-for index in range(0, len(args), 2):
-    key = args[index]
-    path = pathlib.Path(args[index + 1])
-    if path.exists():
-        payload[key] = hashlib.sha256(path.read_bytes()).hexdigest()
-    else:
-        payload[key] = ""
-print(json.dumps(payload, ensure_ascii=False))
-PY
-}
-
-sha256_file() {
-    local path=$1
-
-    if [ ! -f "$path" ]; then
-        echo ""
-        return 0
-    fi
-
-    "$PYTHON_CMD" - "$path" <<'PY'
-import hashlib
-import pathlib
-import sys
-
-path = pathlib.Path(sys.argv[1])
-print(hashlib.sha256(path.read_bytes()).hexdigest())
-PY
 }
 
 detect_python() {
@@ -241,81 +178,10 @@ load_mlx_environment() {
     fi
 }
 
-escape_sed_replacement() {
-    local escaped=${1//\\/\\\\}
-    escaped=${escaped//&/\\&}
-    escaped=${escaped//|/\\|}
-    printf '%s' "$escaped"
-}
-
 write_shell_var() {
     local name=$1
     local value=$2
     printf "%s=%q\n" "$name" "$value"
-}
-
-render_template() {
-    local template_path=$1
-    local output_path=$2
-    local escaped_root
-    local escaped_python
-    local escaped_recipe_path
-    local escaped_goose_provider
-    local escaped_goose_model
-    local escaped_goose_temperature
-    local escaped_goose_lead_provider
-    local escaped_goose_lead_model
-    local escaped_goose_planner_provider
-    local escaped_goose_planner_model
-    local escaped_goose_input_limit
-    local escaped_harness_profile
-
-    escaped_root="$(escape_sed_replacement "$SCRIPT_DIR")"
-    escaped_python="$(escape_sed_replacement "$PYTHON_CMD")"
-    escaped_recipe_path="$(escape_sed_replacement "$RENDERED_RECIPE_PATH")"
-    escaped_goose_provider="$(escape_sed_replacement "${ANGELLA_WORKER_PROVIDER}")"
-    escaped_goose_model="$(escape_sed_replacement "${ANGELLA_WORKER_MODEL}")"
-    escaped_goose_temperature="$(escape_sed_replacement "${ANGELLA_WORKER_TEMPERATURE}")"
-    escaped_goose_lead_provider="$(escape_sed_replacement "${ANGELLA_LEAD_PROVIDER}")"
-    escaped_goose_lead_model="$(escape_sed_replacement "${ANGELLA_LEAD_MODEL}")"
-    escaped_goose_planner_provider="$(escape_sed_replacement "${ANGELLA_PLANNER_PROVIDER}")"
-    escaped_goose_planner_model="$(escape_sed_replacement "${ANGELLA_PLANNER_MODEL}")"
-    escaped_goose_input_limit="$(escape_sed_replacement "${ANGELLA_WORKER_CONTEXT_LIMIT}")"
-    escaped_harness_profile="$(escape_sed_replacement "${ANGELLA_HARNESS_PROFILE_ID}")"
-
-    mkdir -p "$(dirname "$output_path")"
-    sed \
-        -e "s|__ANGELLA_ROOT__|$escaped_root|g" \
-        -e "s|__PYTHON_CMD__|$escaped_python|g" \
-        -e "s|__RENDERED_RECIPE_PATH__|$escaped_recipe_path|g" \
-        -e "s|__GOOSE_PROVIDER__|$escaped_goose_provider|g" \
-        -e "s|__GOOSE_MODEL__|$escaped_goose_model|g" \
-        -e "s|__GOOSE_TEMPERATURE__|$escaped_goose_temperature|g" \
-        -e "s|__GOOSE_LEAD_PROVIDER__|$escaped_goose_lead_provider|g" \
-        -e "s|__GOOSE_LEAD_MODEL__|$escaped_goose_lead_model|g" \
-        -e "s|__GOOSE_PLANNER_PROVIDER__|$escaped_goose_planner_provider|g" \
-        -e "s|__GOOSE_PLANNER_MODEL__|$escaped_goose_planner_model|g" \
-        -e "s|__GOOSE_INPUT_LIMIT__|$escaped_goose_input_limit|g" \
-        -e "s|__ANGELLA_HARNESS_PROFILE_ID__|$escaped_harness_profile|g" \
-        -e "s|__ANGELLA_EXECUTION_MODE__|$(escape_sed_replacement "${ANGELLA_EXECUTION_MODE}")|g" \
-        -e "s|__ANGELLA_WORKER_TIER__|$(escape_sed_replacement "${ANGELLA_WORKER_TIER}")|g" \
-        -e "s|__ANGELLA_FRONTIER_REACHABLE__|$(escape_sed_replacement "${ANGELLA_FRONTIER_REACHABLE}")|g" \
-        -e "s|__ANGELLA_LOCAL_CACHE_ENABLED__|$(escape_sed_replacement "${ANGELLA_LOCAL_CACHE_ENABLED}")|g" \
-        -e "s|__ANGELLA_TOKEN_SAVER_ENABLED__|$(escape_sed_replacement "${ANGELLA_TOKEN_SAVER_ENABLED}")|g" \
-        -e "s|__ANGELLA_MLX_BASE_URL__|$(escape_sed_replacement "${ANGELLA_MLX_BASE_URL}")|g" \
-        -e "s|__ANGELLA_MLX_MODEL__|$(escape_sed_replacement "${ANGELLA_MLX_MODEL}")|g" \
-        "$template_path" > "$output_path"
-}
-
-verify_rendered_template() {
-    local rendered_path=$1
-
-    if grep -Eq '__ANGELLA_ROOT__|__PYTHON_CMD__|__RENDERED_RECIPE_PATH__' "$rendered_path"; then
-        fail "Unresolved template placeholder found in $rendered_path"
-        return 1
-    fi
-
-    return 0
 }
 
 verify_template_source_portable() {
@@ -327,13 +193,6 @@ verify_template_source_portable() {
     fi
 
     return 0
-}
-
-render_and_verify() {
-    local template_path=$1
-    local output_path=$2
-    render_template "$template_path" "$output_path"
-    verify_rendered_template "$output_path"
 }
 
 list_harness_models() {
@@ -426,19 +285,10 @@ write_install_state_summary() {
     ANGELLA_PLANNER_MODEL_ID="$ANGELLA_PLANNER_MODEL_ID" \
     ANGELLA_WORKER_MODEL_ID="$ANGELLA_WORKER_MODEL_ID" \
     ANGELLA_INSTALL_SUMMARY_TIMESTAMP="$timestamp" \
-    ANGELLA_INSTALL_RENDERED_HASHES_JSON="$ANGELLA_INSTALL_RENDERED_HASHES_JSON" \
-    ANGELLA_INSTALL_PREEXISTING_HASHES_JSON="$ANGELLA_INSTALL_PREEXISTING_HASHES_JSON" \
-    ANGELLA_INSTALL_APPLIED_HASHES_JSON="$ANGELLA_INSTALL_APPLIED_HASHES_JSON" \
-    ANGELLA_INSTALL_DRIFT_TARGETS_JSON="$ANGELLA_INSTALL_DRIFT_TARGETS_JSON" \
-    ANGELLA_INSTALL_DRIFT_DETECTED="$ANGELLA_INSTALL_DRIFT_DETECTED" \
     ANGELLA_INSTALL_OVERWRITE_MODE="$ANGELLA_INSTALL_OVERWRITE_MODE" \
     "$PYTHON_CMD" - \
         "$ANGELLA_CONTROL_INSTALL_SUMMARY_PATH" \
-        "$ANGELLA_CONTROL_INSTALL_TELEMETRY_PATH" \
-        "$RENDERED_CONFIG_PATH" \
-        "$RENDERED_RECIPE_PATH" \
-        "$RENDERED_SUB_RECIPE_DIR/code-optimize.yaml" \
-        "$RENDERED_SUB_RECIPE_DIR/evaluate-metric.yaml" <<'PY'
+        "$ANGELLA_CONTROL_INSTALL_TELEMETRY_PATH" <<'PY'
 import datetime as dt
 import json
 import os
@@ -447,19 +297,9 @@ import sys
 
 summary_path = pathlib.Path(sys.argv[1])
 telemetry_path = pathlib.Path(sys.argv[2])
-config_path, autoresearch_path, code_path, eval_path = sys.argv[3:7]
 
 def env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
-
-def env_json(name: str, default):
-    raw = env(name)
-    if not raw:
-        return default
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return default
 
 timestamp = env("ANGELLA_INSTALL_SUMMARY_TIMESTAMP") or dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 summary_payload = {
@@ -479,18 +319,7 @@ summary_payload = {
         "local_cache_enabled": env("ANGELLA_LOCAL_CACHE_ENABLED", "false").lower() == "true",
         "token_saver_enabled": env("ANGELLA_TOKEN_SAVER_ENABLED", "false").lower() == "true",
     },
-    "rendered_hashes": env_json("ANGELLA_INSTALL_RENDERED_HASHES_JSON", {}),
-    "preexisting_target_hashes": env_json("ANGELLA_INSTALL_PREEXISTING_HASHES_JSON", {}),
-    "applied_target_hashes": env_json("ANGELLA_INSTALL_APPLIED_HASHES_JSON", {}),
-    "drift_detected": env("ANGELLA_INSTALL_DRIFT_DETECTED", "false").lower() == "true",
-    "drift_targets": env_json("ANGELLA_INSTALL_DRIFT_TARGETS_JSON", []),
     "overwrite_mode": env("ANGELLA_INSTALL_OVERWRITE_MODE", "not_run"),
-    "paths": {
-        "config": config_path,
-        "autoresearch_loop": autoresearch_path,
-        "code_optimize": code_path,
-        "evaluate_metric": eval_path,
-    },
 }
 summary_path.parent.mkdir(parents=True, exist_ok=True)
 summary_path.write_text(json.dumps(summary_payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -538,11 +367,6 @@ write_bootstrap_state() {
         write_shell_var "ANGELLA_TOKEN_SAVER_ENABLED" "$ANGELLA_TOKEN_SAVER_ENABLED"
         write_shell_var "ANGELLA_NON_GOALS_JSON" "$ANGELLA_NON_GOALS_JSON"
         write_shell_var "ANGELLA_MLX_POLICY_JSON" "$ANGELLA_MLX_POLICY_JSON"
-        write_shell_var "ANGELLA_INSTALL_RENDERED_HASHES_JSON" "$ANGELLA_INSTALL_RENDERED_HASHES_JSON"
-        write_shell_var "ANGELLA_INSTALL_PREEXISTING_HASHES_JSON" "$ANGELLA_INSTALL_PREEXISTING_HASHES_JSON"
-        write_shell_var "ANGELLA_INSTALL_APPLIED_HASHES_JSON" "$ANGELLA_INSTALL_APPLIED_HASHES_JSON"
-        write_shell_var "ANGELLA_INSTALL_DRIFT_DETECTED" "$ANGELLA_INSTALL_DRIFT_DETECTED"
-        write_shell_var "ANGELLA_INSTALL_DRIFT_TARGETS_JSON" "$ANGELLA_INSTALL_DRIFT_TARGETS_JSON"
         write_shell_var "ANGELLA_INSTALL_OVERWRITE_MODE" "$ANGELLA_INSTALL_OVERWRITE_MODE"
     } >"$ANGELLA_BOOTSTRAP_STATE_PATH"
 }
@@ -668,33 +492,6 @@ check_homebrew() {
     else
         fail "Homebrew not found. Install from https://brew.sh"
         exit 1
-    fi
-}
-
-ensure_goose() {
-    info "Checking Goose CLI..."
-    if command -v goose >/dev/null 2>&1; then
-        ok "Goose CLI found"
-        return
-    fi
-
-    if [ "$CHECK_ONLY" = true ]; then
-        warn "Goose CLI not found. setup.sh can install it via Homebrew during a non-check run."
-        return
-    fi
-
-    warn "Goose CLI not found."
-    echo ""
-    echo "  Option 1: brew install block-goose-cli"
-    echo "  Option 2: curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | CONFIGURE=false bash"
-    echo ""
-
-    if prompt_yes_no "Install via Homebrew?" "yes"; then
-        brew install block-goose-cli
-        ok "Goose CLI installed"
-    else
-        warn "Skipping Goose CLI installation."
-        warn "Please install Goose manually before running recipes."
     fi
 }
 
@@ -833,169 +630,6 @@ load_python_for_install_stage() {
     exit 1
 }
 
-render_all_templates() {
-    local config_target=$1
-    local recipe_target=$2
-    local sub_recipe_dir=$3
-    local custom_provider_dir=$4
-
-    verify_template_source_portable "$SCRIPT_DIR/config/goose-config.yaml"
-    verify_template_source_portable "$SCRIPT_DIR/recipes/autoresearch-loop.yaml"
-    verify_template_source_portable "$SCRIPT_DIR/recipes/sub/code-optimize.yaml"
-    verify_template_source_portable "$SCRIPT_DIR/recipes/sub/evaluate-metric.yaml"
-    verify_template_source_portable "$SCRIPT_DIR/config/custom-providers/mlx-local.json.template"
-
-    render_and_verify "$SCRIPT_DIR/config/goose-config.yaml" "$config_target"
-    render_and_verify "$SCRIPT_DIR/recipes/autoresearch-loop.yaml" "$recipe_target"
-    render_and_verify "$SCRIPT_DIR/recipes/sub/code-optimize.yaml" "$sub_recipe_dir/code-optimize.yaml"
-    render_and_verify "$SCRIPT_DIR/recipes/sub/evaluate-metric.yaml" "$sub_recipe_dir/evaluate-metric.yaml"
-    render_and_verify "$SCRIPT_DIR/config/custom-providers/mlx-local.json.template" "$custom_provider_dir/angella_mlx_local.json"
-}
-
-check_templates_only() {
-    CHECK_RENDER_DIR="$(mktemp -d)"
-    info "Rendering templates into temporary directory..."
-    render_all_templates \
-        "$CHECK_RENDER_DIR/config.yaml" \
-        "$CHECK_RENDER_DIR/autoresearch-loop.yaml" \
-        "$CHECK_RENDER_DIR/sub" \
-        "$CHECK_RENDER_DIR/custom_providers"
-    ok "Template rendering checks passed"
-}
-
-install_templates() {
-    local render_dir
-    local rendered_config_path
-    local rendered_recipe_path
-    local rendered_code_path
-    local rendered_eval_path
-    local rendered_mlx_path
-    local existing_config_hash
-    local existing_recipe_hash
-    local existing_code_hash
-    local existing_eval_hash
-    local rendered_config_hash
-    local rendered_recipe_hash
-    local rendered_code_hash
-    local rendered_eval_hash
-    local applied_hashes_json
-    local drift_targets=()
-    local overwrite_mode="installed_new"
-
-    info "Rendering Angella templates..."
-    render_dir="$(mktemp -d)"
-    rendered_config_path="$render_dir/config.yaml"
-    rendered_recipe_path="$render_dir/autoresearch-loop.yaml"
-    rendered_code_path="$render_dir/sub/code-optimize.yaml"
-    rendered_eval_path="$render_dir/sub/evaluate-metric.yaml"
-    rendered_mlx_path="$render_dir/custom_providers/angella_mlx_local.json"
-
-    render_all_templates \
-        "$rendered_config_path" \
-        "$rendered_recipe_path" \
-        "$render_dir/sub" \
-        "$render_dir/custom_providers"
-
-    existing_config_hash="$(sha256_file "$RENDERED_CONFIG_PATH")"
-    existing_recipe_hash="$(sha256_file "$RENDERED_RECIPE_PATH")"
-    existing_code_hash="$(sha256_file "$RENDERED_SUB_RECIPE_DIR/code-optimize.yaml")"
-    existing_eval_hash="$(sha256_file "$RENDERED_SUB_RECIPE_DIR/evaluate-metric.yaml")"
-
-    rendered_config_hash="$(sha256_file "$rendered_config_path")"
-    rendered_recipe_hash="$(sha256_file "$rendered_recipe_path")"
-    rendered_code_hash="$(sha256_file "$rendered_code_path")"
-    rendered_eval_hash="$(sha256_file "$rendered_eval_path")"
-
-    ANGELLA_INSTALL_PREEXISTING_HASHES_JSON="$(hash_dict_json \
-        config "$RENDERED_CONFIG_PATH" \
-        autoresearch_loop "$RENDERED_RECIPE_PATH" \
-        code_optimize "$RENDERED_SUB_RECIPE_DIR/code-optimize.yaml" \
-        evaluate_metric "$RENDERED_SUB_RECIPE_DIR/evaluate-metric.yaml")"
-    ANGELLA_INSTALL_RENDERED_HASHES_JSON="$(hash_dict_json \
-        config "$rendered_config_path" \
-        autoresearch_loop "$rendered_recipe_path" \
-        code_optimize "$rendered_code_path" \
-        evaluate_metric "$rendered_eval_path" \
-        mlx_local "$rendered_mlx_path")"
-
-    [ -n "$existing_config_hash" ] && [ "$existing_config_hash" != "$rendered_config_hash" ] && drift_targets+=("config")
-    [ -n "$existing_recipe_hash" ] && [ "$existing_recipe_hash" != "$rendered_recipe_hash" ] && drift_targets+=("autoresearch_loop")
-    [ -n "$existing_code_hash" ] && [ "$existing_code_hash" != "$rendered_code_hash" ] && drift_targets+=("code_optimize")
-    [ -n "$existing_eval_hash" ] && [ "$existing_eval_hash" != "$rendered_eval_hash" ] && drift_targets+=("evaluate_metric")
-
-    ANGELLA_INSTALL_DRIFT_DETECTED=false
-    if [ "${#drift_targets[@]}" -gt 0 ]; then
-        ANGELLA_INSTALL_DRIFT_DETECTED=true
-        ANGELLA_INSTALL_DRIFT_TARGETS_JSON="$(json_array_from_args "${drift_targets[@]}")"
-    else
-        ANGELLA_INSTALL_DRIFT_TARGETS_JSON="[]"
-    fi
-
-    mkdir -p "$GOOSE_RECIPE_DIR" "$RENDERED_SUB_RECIPE_DIR" "$ANGELLA_CUSTOM_PROVIDER_DIR"
-    cp "$rendered_recipe_path" "$RENDERED_RECIPE_PATH"
-    cp "$rendered_code_path" "$RENDERED_SUB_RECIPE_DIR/code-optimize.yaml"
-    cp "$rendered_eval_path" "$RENDERED_SUB_RECIPE_DIR/evaluate-metric.yaml"
-    cp "$rendered_mlx_path" "$ANGELLA_CUSTOM_PROVIDER_DIR/angella_mlx_local.json"
-
-    if [ -f "$RENDERED_CONFIG_PATH" ]; then
-        if [ "$existing_config_hash" = "$rendered_config_hash" ]; then
-            info "Goose config already matches the rendered Angella config"
-            overwrite_mode="already_synced"
-        else
-            warn "Goose config already exists at $RENDERED_CONFIG_PATH"
-            if [ "$ANGELLA_INSTALL_DRIFT_DETECTED" = true ]; then
-                warn "Detected install drift before overwrite. Targets: $ANGELLA_INSTALL_DRIFT_TARGETS_JSON"
-            fi
-            if [ "$AUTO_YES" = true ]; then
-                info "AUTO_YES=true -> overwriting existing Goose config to avoid stale install drift"
-                cp "$rendered_config_path" "$RENDERED_CONFIG_PATH"
-                overwrite_mode="auto_yes_overwrite"
-                ok "Goose config updated"
-            elif prompt_yes_no "Overwrite with Angella config?" "no"; then
-                cp "$rendered_config_path" "$RENDERED_CONFIG_PATH"
-                overwrite_mode="prompt_overwrite"
-                ok "Goose config updated"
-            else
-                overwrite_mode="kept_existing_config"
-                info "Keeping existing config. Angella templates for recipes were still refreshed."
-            fi
-        fi
-    else
-        cp "$rendered_config_path" "$RENDERED_CONFIG_PATH"
-        overwrite_mode="installed_new"
-        ok "Goose config installed to $RENDERED_CONFIG_PATH"
-    fi
-
-    ANGELLA_INSTALL_OVERWRITE_MODE="$overwrite_mode"
-    applied_hashes_json="$(hash_dict_json \
-        config "$RENDERED_CONFIG_PATH" \
-        autoresearch_loop "$RENDERED_RECIPE_PATH" \
-        code_optimize "$RENDERED_SUB_RECIPE_DIR/code-optimize.yaml" \
-        evaluate_metric "$RENDERED_SUB_RECIPE_DIR/evaluate-metric.yaml")"
-    ANGELLA_INSTALL_APPLIED_HASHES_JSON="$applied_hashes_json"
-    rm -rf "$render_dir"
-
-    ok "Rendered recipe installed to $RENDERED_RECIPE_PATH"
-    ok "Rendered sub-recipes installed to $RENDERED_SUB_RECIPE_DIR"
-}
-
-json_array_to_display() {
-    "$PYTHON_CMD" - "$1" <<'PY'
-import json
-import sys
-
-try:
-    payload = json.loads(sys.argv[1])
-except json.JSONDecodeError:
-    payload = []
-
-if not payload:
-    print("[]")
-else:
-    print(", ".join(str(item) for item in payload))
-PY
-}
-
 report_harness_credential_status() {
     local env_name
     local missing=0
@@ -1044,9 +678,7 @@ report_harness_credential_status() {
 
     if [ "$missing" -eq 1 ]; then
         warn "One or more selected lead/planner credentials are missing."
-        echo "  Configure later with:"
-        echo "    goose configure"
-        echo "  Or export the provider API key before running the recipe."
+        echo "  Export the provider API key before running gemini commands."
     fi
 }
 
@@ -1054,7 +686,7 @@ print_banner() {
     echo ""
     echo "============================================"
     echo "  🦆 Angella — M3 Autoresearch Setup"
-    echo "  MacBook Pro M3 36GB + MLX + Goose"
+    echo "  MacBook Pro M3 36GB + Meta-Harness"
     echo "============================================"
     echo ""
 }
@@ -1081,7 +713,7 @@ print_summary() {
     fi
     echo "     source $SCRIPT_DIR/.env.mlx"
     echo ""
-    echo "  Harness:"
+    echo "  Harness (Meta-Architecture):"
     echo "     profile: ${ANGELLA_HARNESS_PROFILE_ID}"
     echo "     lead: ${ANGELLA_LEAD_PROVIDER}/${ANGELLA_LEAD_MODEL}"
     echo "     planner: ${ANGELLA_PLANNER_PROVIDER}/${ANGELLA_PLANNER_MODEL}"
@@ -1097,14 +729,6 @@ print_summary() {
         echo "     mlx model: ${ANGELLA_MLX_MODEL}"
     fi
     echo ""
-    if [ "$CHECK_ONLY" = false ] && [ "$BOOTSTRAP_ONLY" = false ] && [ "${ANGELLA_INSTALL_OVERWRITE_MODE:-not_run}" != "not_run" ]; then
-        echo "  Install drift:"
-        echo "     detected: ${ANGELLA_INSTALL_DRIFT_DETECTED:-false}"
-        echo "     targets: $(json_array_to_display "${ANGELLA_INSTALL_DRIFT_TARGETS_JSON:-[]}")"
-        echo "     overwrite mode: ${ANGELLA_INSTALL_OVERWRITE_MODE:-not_run}"
-        echo "     summary: ${ANGELLA_CONTROL_INSTALL_SUMMARY_PATH}"
-        echo ""
-    fi
 
     if [ "$BOOTSTRAP_ONLY" = true ]; then
         echo "  2. Install stage 실행:"
@@ -1113,8 +737,8 @@ print_summary() {
         echo "  Bootstrap Python:"
         echo "     ${ANGELLA_BOOTSTRAP_VENV_DIR}/bin/python"
     else
-        echo "  2. Angella recipe 실행:"
-        echo "     goose run --recipe $RENDERED_RECIPE_PATH -s"
+        echo "  2. Angella Meta-Harness 실행:"
+        echo "     gemini \"[Task Instruction]\""
         echo ""
         if [ "$CHECK_ONLY" = false ]; then
             echo "  Bootstrap Python:"
@@ -1130,6 +754,6 @@ print_summary() {
     echo "     wheelhouse: $ANGELLA_WHEELHOUSE_DIR"
     echo ""
     echo "  Logs:"
-    echo "     $SCRIPT_DIR/logs/Goose Logs/"
+    echo "     $SCRIPT_DIR/knowledge/log.md (Event Stream)"
     echo ""
 }

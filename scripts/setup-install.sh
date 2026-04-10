@@ -11,7 +11,6 @@ if [ "$CHECK_ONLY" = true ]; then
     detect_python_runtime
     load_mlx_environment false
     check_python_requirements_support
-    check_templates_only
     report_harness_credential_status
     exit 0
 fi
@@ -24,10 +23,8 @@ if [ -n "$HARNESS_PROFILE" ] || [ -n "$LEAD_MODEL_OVERRIDE" ] || [ -n "$PLANNER_
     write_bootstrap_state
 fi
 
-install_templates
-
-mkdir -p "$SCRIPT_DIR/logs/Goose Logs"
-ok "Log directory created: $SCRIPT_DIR/logs/Goose Logs/"
+mkdir -p "$SCRIPT_DIR/knowledge"
+ok "Knowledge directory verified: $SCRIPT_DIR/knowledge/"
 
 create_control_plane_layout
 write_bootstrap_state
