@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
-  set -x
-fi
+set -x
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TMP_ROOT="$(mktemp -d)"

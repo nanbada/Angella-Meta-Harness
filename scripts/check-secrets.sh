@@ -20,6 +20,7 @@ if command -v rg >/dev/null 2>&1; then
     --glob '!*.example' \
     --glob '!.env*' \
     --glob '!scripts/setup-vault.sh' \
+    --glob '!scripts/test_setup_flows.sh' \
     --glob '!*.sample' \
     --glob '!*.md' \
     "$PATTERN" . >"$TMP_MATCHES" || true
@@ -34,6 +35,7 @@ else
     --exclude='*.example' \
     --exclude='.env*' \
     --exclude='setup-vault.sh' \
+    --exclude='scripts/test_setup_flows.sh' \
     --exclude='*.sample' \
     --exclude='*.md' \
     "$PATTERN" . >"$TMP_MATCHES" || true
