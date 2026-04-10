@@ -27,6 +27,8 @@ echo "DEBUG: ROOT_DIR=$ROOT_DIR"
 
 # --- Mocking binaries ---
 REAL_CURL=$(command -v curl || echo "/usr/bin/curl")
+REAL_PYTHON_BIN=$(command -v python3 || command -v python)
+
 cat >"$FAKE_BIN/curl" <<EOF
 #!/usr/bin/env bash
 if [[ "\$*" == *"localhost:11434/api/tags"* ]]; then
@@ -45,6 +47,26 @@ exec "$REAL_CURL" "\$@"
 EOF
 chmod +x "$FAKE_BIN/curl"
 
+# Smart Python mock: intercept venv and pip
+cat >"$FAKE_BIN/python3" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "-m" && "\$2" == "venv" ]]; then
+  mkdir -p "\$3/bin"
+  cat >"\$3/bin/python" <<INNER
+#!/usr/bin/env bash
+exec "$FAKE_BIN/python3" "\\\$@"
+INNER
+  chmod +x "\$3/bin/python"
+  exit 0
+fi
+if [[ "\$1" == "-m" && "\$2" == "pip" ]]; then
+  exit 0
+fi
+exec "$REAL_PYTHON_BIN" "\$@"
+EOF
+chmod +x "$FAKE_BIN/python3"
+cp "$FAKE_BIN/python3" "$FAKE_BIN/python"
+
 cat >"$FAKE_BIN/brew" <<EOF
 #!/usr/bin/env bash
 exit 0
@@ -62,6 +84,12 @@ cat >"$FAKE_BIN/ollama" <<EOF
 exit 0
 EOF
 chmod +x "$FAKE_BIN/ollama"
+
+cat >"$FAKE_BIN/uv" <<EOF
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$FAKE_BIN/uv"
 
 export PATH="$FAKE_BIN:$PATH"
 
