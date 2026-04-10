@@ -75,7 +75,7 @@ def main() -> int:
     assert local_lab.returncode == 0, local_lab.stderr
     local_lab_payload = json.loads(local_lab.stdout)
     assert local_lab_payload["worker"]["id"] == MLX_MODEL_ID
-    assert local_lab_payload["worker"]["goose_provider"] == "angella_mlx_local"
+    assert local_lab_payload["worker"]["harness_provider"] == "angella_mlx_local"
     assert local_lab_payload["worker"]["model"] == MLX_MODEL_NAME
     assert local_lab_payload["routing"]["worker_tier"] == "local_augment"
     assert local_lab_payload["capabilities"]["mlx_enabled"] is True

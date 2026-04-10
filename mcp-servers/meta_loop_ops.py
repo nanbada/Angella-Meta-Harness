@@ -16,7 +16,7 @@ from control_plane import append_jsonl, ensure_control_plane_layout, run_dir, sa
 
 
 ANGELLA_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_LOG_ROOT = ANGELLA_ROOT / "logs" / "Goose Logs"
+DEFAULT_LOG_ROOT = ANGELLA_ROOT / "logs" / "Meta-Harness Logs"
 
 
 def _now_timestamp() -> str:

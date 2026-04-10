@@ -566,56 +566,132 @@ class RedisScionProvider(ScionProvider):
         key = self._agent_key(agent_id)
         state = {
             "agent_id": agent_id, "status": status, "message": message, "intent": intent,
-            "claimed_files": json.dumps(_normalize_paths(files)), "metadata": json.dumps(metadata)
+            "claimed_files": json.dumps(_normalize_paths(files)), "metadata": json.dumps(metadata),
+            "updated_at": _iso_now()
         }
         self.r.hset(key, mapping=state)
         self.r.expire(key, ttl)
-        self.r.xadd(f"{self.prefix}:events", {"agent_id": agent_id, "kind": "broadcast", "message": message})
+        self.r.xadd(f"{self.prefix}:events", {"agent_id": agent_id, "kind": "broadcast", "message": message, "timestamp": _iso_now()})
         return {"content": [{"type": "text", "text": f"Broadcast recorded (Redis) for {agent_id}."}]}
 
     def claim_files(self, agent_id: str, files: list[str], mode: str, intent: str, message: str, ttl_seconds: int | None, takeover_from: str, metadata: dict[str, Any]) -> dict[str, Any]:
         ttl = ttl_seconds or _default_ttl_seconds()
         normalized = _normalize_paths(files)
+        overlap_found = False
         took_over_from = set()
+        
+        # Load all existing claims from Redis to find conflicts
+        claim_keys = self.r.keys(f"{self.prefix}:claim:*")
+        existing_claims = []
+        for ck in claim_keys:
+            raw = self.r.get(ck)
+            if raw:
+                try:
+                    cdata = json.loads(raw)
+                    cdata["_key"] = ck
+                    existing_claims.append(cdata)
+                except: continue
+
+        metadata_for_new_claims = {}
+
         for f in normalized:
-            key = self._claim_key(f)
-            if mode == "exclusive" and not self.r.set(key, agent_id, nx=True, ex=ttl):
-                owner = self.r.get(key)
-                if owner != agent_id: raise RuntimeError(f"Conflicting Scion claims detected: {owner} -> {f}")
-            else:
-                if mode == "takeover":
-                    owner = self.r.get(key)
-                    if owner == takeover_from: took_over_from.add(owner)
-                self.r.set(key, agent_id, ex=ttl)
-        
+            matching_conflicts = [r for r in existing_claims if r.get("agent_id") != agent_id and _paths_overlap(f, r.get("claimed_path", ""))]
+            
+            for conflict in matching_conflicts:
+                owner = conflict.get("agent_id")
+                claimed = conflict.get("claimed_path", "")
+                
+                if mode == "exclusive":
+                    if f not in conflict.get("exclusions", []):
+                        raise RuntimeError(f"Conflicting Scion claims detected (Redis): {owner} -> {f}")
+                elif mode == "takeover" and owner == takeover_from:
+                    if f == claimed:
+                        took_over_from.add(owner)
+                        # Remove exact claim from owner's state (best effort)
+                        okey = self._agent_key(owner)
+                        ostate_raw = self.r.hget(okey, "claimed_files")
+                        if ostate_raw:
+                            oclaims = json.loads(ostate_raw)
+                            if f in oclaims:
+                                oclaims.remove(f)
+                                self.r.hset(okey, "claimed_files", json.dumps(oclaims))
+                    elif _path_within(f, claimed):
+                        took_over_from.add(owner)
+                        exclusions = conflict.get("exclusions", [])
+                        if f not in exclusions:
+                            exclusions.append(f)
+                            conflict["exclusions"] = exclusions
+                            self.r.set(conflict["_key"], json.dumps({k:v for k,v in conflict.items() if not k.startswith("_")}), keepttl=True)
+                        
+                        metadata_for_new_claims[f] = {
+                            "decomposed_from_agent": owner,
+                            "decomposed_from_claimed_path": claimed
+                        }
+                else:
+                    if f not in conflict.get("exclusions", []):
+                        overlap_found = True
+
         agent_key = self._agent_key(agent_id)
-        current = json.loads(self.r.hget(agent_key, "claimed_files") or "[]")
-        new_claims = sorted(list(set(current + normalized)))
-        self.r.hset(agent_key, "claimed_files", json.dumps(new_claims))
+        current_raw = self.r.hget(agent_key, "claimed_files")
+        current = json.loads(current_raw) if current_raw else []
+        new_claims_list = sorted(list(set(current + normalized)))
+        self.r.hset(agent_key, "claimed_files", json.dumps(new_claims_list))
         self.r.expire(agent_key, ttl)
+
+        if mode in {"exclusive", "takeover"}:
+            for f in normalized:
+                payload = {
+                    "agent_id": agent_id, "claimed_path": f, "mode": mode, "exclusions": []
+                }
+                if f in metadata_for_new_claims:
+                    payload.update(metadata_for_new_claims[f])
+                self.r.set(self._claim_key(f), json.dumps(payload), ex=ttl)
         
-        text = f"Claimed (Redis) {len(normalized)} file(s) for {agent_id}."
-        if took_over_from:
-            text += f"\nTook over exact claims from: {', '.join(sorted(took_over_from))}"
+        text = f"Claimed (Redis) {len(normalized)} file(s) for {agent_id}: {', '.join(normalized)}"
+        if mode != "advisory": text += f"\nClaim mode: {mode}"
+        if overlap_found: text += f"\nWarning: overlapping claims detected with active peers."
+        if took_over_from: text += f"\nTook over claims from: {', '.join(sorted(took_over_from))}"
         return {"content": [{"type": "text", "text": text}]}
 
     def release_claims(self, agent_id: str, files: list[str], note: str, ttl_seconds: int | None) -> dict[str, Any]:
         agent_key = self._agent_key(agent_id)
-        current = json.loads(self.r.hget(agent_key, "claimed_files") or "[]")
+        current_raw = self.r.hget(agent_key, "claimed_files")
+        current = json.loads(current_raw) if current_raw else []
         to_release = _normalize_paths(files) if files else current
         remaining = [f for f in current if f not in to_release]
         
         for f in to_release:
-            key = self._claim_key(f)
-            if self.r.get(key) == agent_id: self.r.delete(key)
+            ckey = self._claim_key(f)
+            raw = self.r.get(ckey)
+            if raw:
+                existing = json.loads(raw)
+                if existing.get("agent_id") == agent_id:
+                    parent_agent = existing.get("decomposed_from_agent")
+                    parent_path = existing.get("decomposed_from_claimed_path")
+                    if parent_agent and parent_path:
+                        pkey = self._claim_key(parent_path)
+                        praw = self.r.get(pkey)
+                        if praw:
+                            prec = json.loads(praw)
+                            if prec.get("agent_id") == parent_agent:
+                                excl = prec.get("exclusions", [])
+                                if f in excl:
+                                    excl.remove(f)
+                                    prec["exclusions"] = excl
+                                    self.r.set(pkey, json.dumps(prec), keepttl=True)
+                    self.r.delete(ckey)
         
         self.r.hset(agent_key, "claimed_files", json.dumps(remaining))
+        if note: self.r.hset(agent_key, "message", note)
         return {"content": [{"type": "text", "text": f"Released (Redis) {len(to_release)} claim(s) for {agent_id}."}]}
 
     def heartbeat(self, agent_id: str, status: str | None, intent: str | None, message: str | None, ttl_seconds: int | None) -> dict[str, Any]:
         ttl = ttl_seconds or _default_ttl_seconds()
         key = self._agent_key(agent_id)
         if status: self.r.hset(key, "status", status)
+        if intent: self.r.hset(key, "intent", intent)
+        if message: self.r.hset(key, "message", message)
+        self.r.hset(key, "updated_at", _iso_now())
         self.r.expire(key, ttl)
         return {"content": [{"type": "text", "text": f"Heartbeat (Redis) recorded for {agent_id}."}]}
 
@@ -623,8 +699,12 @@ class RedisScionProvider(ScionProvider):
         branch = worktree.get("branch")
         if not branch: raise ValueError("Worktree must have a branch.")
         ttl = ttl_seconds or _default_ttl_seconds()
-        self.r.hset(self._worktree_key(branch), mapping={**worktree, "agent_id": agent_id})
-        self.r.expire(self._worktree_key(branch), ttl)
+        self.r.set(self._worktree_key(branch), json.dumps({**worktree, "agent_id": agent_id}), ex=ttl)
+        
+        key = self._agent_key(agent_id)
+        self.r.hset(key, "worktree", json.dumps(worktree))
+        if status: self.r.hset(key, "status", status)
+        self.r.expire(key, ttl)
         return {"content": [{"type": "text", "text": f"Registered worktree (Redis) for {agent_id}: branch={branch}"}]}
 
     def prepare_worktree(self, agent_id: str, repo_root: Path, branch: str, base_branch: str, worktree_path: Path, allow_dirty_root: bool, ttl_seconds: int | None) -> dict[str, Any]:
@@ -632,7 +712,7 @@ class RedisScionProvider(ScionProvider):
             status = _run_git(repo_root, ["status", "--porcelain"])
             if status: raise RuntimeError("Repo root is dirty.")
         _run_git(repo_root, ["worktree", "add", "-b", branch, str(worktree_path), base_branch])
-        return self.register_worktree(agent_id, repo_root, {"path": str(worktree_path), "branch": branch}, ttl_seconds, "planning", None, None)
+        return self.register_worktree(agent_id, repo_root, {"path": str(worktree_path), "branch": branch, "base_branch": base_branch}, ttl_seconds, "planning", None, None)
 
     def remove_worktree(self, agent_id: str, repo_root: Path, branch: str, worktree_path: Path, force: bool, ttl_seconds: int | None) -> dict[str, Any]:
         args = ["worktree", "remove"]
@@ -640,22 +720,119 @@ class RedisScionProvider(ScionProvider):
         args.append(str(worktree_path))
         _run_git(repo_root, args)
         self.r.delete(self._worktree_key(branch))
+        
+        akey = self._agent_key(agent_id)
+        self.r.hdel(akey, "worktree")
         return {"content": [{"type": "text", "text": f"Removed worktree (Redis) for {agent_id}: branch={branch}"}]}
 
     def inspect_state(self, include_events: bool, event_limit: int) -> dict[str, Any]:
         lines = [f"Backend: Redis ({self.r.connection_pool.connection_kwargs.get('host')})"]
-        keys = self.r.keys(f"{self.prefix}:agent:*")
-        lines.append(f"Active agents: {len(keys)}")
-        for k in keys:
-            data = self.r.hgetall(k)
-            lines.append(f"- {data.get('agent_id')} status={data.get('status')}")
+        
+        akeys = self.r.keys(f"{self.prefix}:agent:*")
+        if not akeys:
+            lines.append("Active agents: none")
+        else:
+            lines.append("Active agents:")
+            for k in sorted(akeys):
+                data = self.r.hgetall(k)
+                cid = data.get("agent_id")
+                claims = json.loads(data.get("claimed_files", "[]"))
+                line = f"- {cid} status={data.get('status')} claims={','.join(claims)}"
+                wt = json.loads(data.get("worktree", "{}"))
+                if wt: line += f" worktree={_format_worktree(wt)}"
+                lines.append(line)
+        
+        ckeys = self.r.keys(f"{self.prefix}:claim:*")
+        if not ckeys:
+            lines.append("Authoritative claims: none")
+        else:
+            lines.append("Authoritative claims:")
+            for k in sorted(ckeys):
+                raw = self.r.get(k)
+                if raw:
+                    data = json.loads(raw)
+                    line = f"- {data.get('claimed_path')} owner={data.get('agent_id')} mode={data.get('mode')}"
+                    excl = data.get("exclusions", [])
+                    if excl: line += f" (excluding: {','.join(excl)})"
+                    lines.append(line)
+
+        wkeys = self.r.keys(f"{self.prefix}:worktree:*")
+        if not wkeys:
+            lines.append("Reserved worktrees: none")
+        else:
+            lines.append("Reserved worktrees:")
+            for k in sorted(wkeys):
+                raw = self.r.get(k)
+                if raw:
+                    data = json.loads(raw)
+                    lines.append(f"- owner={data.get('agent_id')} branch={data.get('branch')} path={data.get('path')}")
+
+        if include_events:
+            # Redis Stream for events
+            try:
+                events = self.r.xrevrange(f"{self.prefix}:events", count=event_limit)
+                if not events:
+                    lines.append("Recent events: none")
+                else:
+                    lines.append("Recent events (Stream):")
+                    for eid, edata in events:
+                        lines.append(f"- {eid} kind={edata.get('kind')} agent={edata.get('agent_id')} msg={edata.get('message')}")
+            except:
+                lines.append("Recent events: (stream unavailable)")
+
         return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
     def query_peers(self, agent_id: str, query: str, candidate_files: list[str]) -> dict[str, Any]:
-        return {"content": [{"type": "text", "text": "No direct conflicts detected (Redis)."}]}
+        normalized = _normalize_paths(candidate_files)
+        
+        ckeys = self.r.keys(f"{self.prefix}:claim:*")
+        conflicts = []
+        authoritative_paths = set()
+        for k in ckeys:
+            raw = self.r.get(k)
+            if not raw: continue
+            rec = json.loads(raw)
+            owner = rec.get("agent_id")
+            if owner == agent_id: continue
+            
+            claimed = rec.get("claimed_path", "")
+            authoritative_paths.add((owner, claimed))
+            for c in normalized:
+                if _paths_overlap(c, claimed):
+                    if c not in rec.get("exclusions", []):
+                        conflicts.append(f"{owner} -> {c} (peer claim: {claimed})")
+
+        akeys = self.r.keys(f"{self.prefix}:agent:*")
+        peers = []
+        for k in akeys:
+            data = self.r.hgetall(k)
+            pid = data.get("agent_id")
+            if pid == agent_id: continue
+            
+            peer_claims = json.loads(data.get("claimed_files", "[]"))
+            for pc in peer_claims:
+                if (pid, pc) not in authoritative_paths:
+                    for c in normalized:
+                        if _paths_overlap(c, pc):
+                            conflicts.append(f"{pid} -> {c} (peer claim: {pc})")
+            peers.append(f"{pid} status={data.get('status')} claims={','.join(peer_claims)}")
+
+        text = ""
+        if conflicts:
+            text += "Conflicts detected (Redis) with active peers:\n" + "\n".join(sorted(list(set(conflicts)))) + "\n\n"
+        else:
+            text += "No direct conflicts detected (Redis).\n\n"
+        
+        text += "Active peers (Redis):\n" + ("\n".join(peers) if peers else "none")
+        return {"content": [{"type": "text", "text": text}]}
 
     def prune_stale(self, event_retention_seconds: int) -> dict[str, Any]:
-        return {"content": [{"type": "text", "text": "Redis auto-prunes via TTL."}]}
+        # Redis auto-prunes via TTL for most things.
+        # Events in Stream might need manual pruning if we want to limit size.
+        try:
+            self.r.xtrim(f"{self.prefix}:events", maxlen=1000, approximate=True)
+        except: pass
+        return {"content": [{"type": "text", "text": "Redis state auto-pruned via TTL; Stream trimmed to last 1000 items."}]}
 
 
 # --- Factory & Handler ---

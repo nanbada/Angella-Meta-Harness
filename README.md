@@ -1,6 +1,6 @@
 # Angella (v3) - Meta-Harness
 
-MacBook Pro M3 36GB 기반 **Meta-Harness Architecture**를 적용한 차세대 Personal Agent Harness입니다. Anthropic의 Brain/Hand 분리 철학을 통해 무한히 진화하는 에이전트 환경을 제공합니다.
+**Meta-Harness Architecture**를 적용한 차세대 Personal Agent Harness입니다. Anthropic의 Brain/Hand 분리 철학을 통해 무한히 진화하는 에이전트 환경을 제공합니다.
 
 ## 🚀 Quick Start
 

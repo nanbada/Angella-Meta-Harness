@@ -1,22 +1,27 @@
 # ============================================================
-# Goose Custom Distribution — Init Config
+# Angella Meta-Harness — Initial Configuration
 # ============================================================
-# Fork한 Goose repo 루트에 이 파일을 두면 첫 실행 시 자동 적용됩니다.
-# 또는 GOOSE_INIT_CONFIG 환경변수로 경로를 지정합니다.
-# 
-# 참고: https://github.com/block/goose/blob/main/CUSTOM_DISTROS.md
+# This configuration defines the default models and modes for the
+# Angella Meta-Harness. It is used during the bootstrap process.
 # ============================================================
 
-GOOSE_PROVIDER: openai
-GOOSE_MODEL: gpt-5.2
+# --- Core Orchestration ---
+# Default models used if not overridden by profiles or command line
+ANGELLA_LEAD_PROVIDER: openai
+ANGELLA_LEAD_MODEL: gpt-5.2-pro
 
-# Lead/Worker Harness
-GOOSE_LEAD_PROVIDER: openai
-GOOSE_LEAD_MODEL: gpt-5.2-pro
-GOOSE_LEAD_TURNS: 3
+ANGELLA_PLANNER_PROVIDER: openai
+ANGELLA_PLANNER_MODEL: gpt-5.2-pro
 
-# Mode
-GOOSE_MODE: smart_approve
+ANGELLA_WORKER_PROVIDER: openai
+ANGELLA_WORKER_MODEL: gpt-5.2
 
-# Telemetry & Security
-GOOSE_TELEMETRY_ENABLED: false
+# --- Operational Mode ---
+# approved: Always ask for approval before write operations
+# auto: Autonomous execution (use with caution)
+# smart_approve: Approve minor changes automatically, ask for major ones
+ANGELLA_MODE: smart_approve
+
+# --- Telemetry & Security ---
+ANGELLA_TELEMETRY_ENABLED: false
+ANGELLA_LOG_LEVEL: INFO

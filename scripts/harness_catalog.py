@@ -391,7 +391,7 @@ def resolve_selection(
         "planner": planner,
         "worker": worker,
         "capabilities": {
-            "mlx_enabled": worker["goose_provider"] == "angella_mlx_local",
+            "mlx_enabled": worker["harness_provider"] == "angella_mlx_local",
             "apfel_enabled": worker["id"] == "apfel_foundationmodel",
             "mlx_preview_enabled": "preview" in worker.get("flags", []),
             "nvfp4_enabled": "preview" in worker.get("flags", []),
@@ -417,7 +417,7 @@ def print_list_models(resolved_models: list[dict]) -> None:
 
         print(
             f"{model['id']}: roles={','.join(model['role_support'])} "
-            f"provider={model['goose_provider']} model={model['model']} tier={model.get('tier', 'unknown')} status={status}"
+            f"provider={model['harness_provider']} model={model['model']} tier={model.get('tier', 'unknown')} status={status}"
         )
 
 
@@ -451,15 +451,15 @@ def print_shell_resolution(resolution: dict) -> None:
         "ANGELLA_LEAD_MODEL_ID": lead["id"],
         "ANGELLA_PLANNER_MODEL_ID": planner["id"],
         "ANGELLA_WORKER_MODEL_ID": worker["id"],
-        "ANGELLA_LEAD_PROVIDER": lead["goose_provider"],
+        "ANGELLA_LEAD_PROVIDER": lead["harness_provider"],
         "ANGELLA_LEAD_MODEL": lead["model"],
         "ANGELLA_LEAD_CONTEXT_LIMIT": str(lead["context_limit"]),
         "ANGELLA_LEAD_TEMPERATURE": str(lead["temperature_default"]),
-        "ANGELLA_PLANNER_PROVIDER": planner["goose_provider"],
+        "ANGELLA_PLANNER_PROVIDER": planner["harness_provider"],
         "ANGELLA_PLANNER_MODEL": planner["model"],
         "ANGELLA_PLANNER_CONTEXT_LIMIT": str(planner["context_limit"]),
         "ANGELLA_PLANNER_TEMPERATURE": str(planner["temperature_default"]),
-        "ANGELLA_WORKER_PROVIDER": worker["goose_provider"],
+        "ANGELLA_WORKER_PROVIDER": worker["harness_provider"],
         "ANGELLA_WORKER_MODEL": worker["model"],
         "ANGELLA_WORKER_CONTEXT_LIMIT": str(worker["context_limit"]),
         "ANGELLA_WORKER_TEMPERATURE": str(worker["temperature_default"]),

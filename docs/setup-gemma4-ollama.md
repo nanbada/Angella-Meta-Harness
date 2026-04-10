@@ -1,13 +1,13 @@
 # Gemma 4 + Ollama Local Worker Guide
 
-이 문서는 Angella에서 Gemma 4 Ollama local worker를 실제 `setup -> catalog resolution -> Goose runtime`까지 연결하는 현재 기준 가이드입니다.
+이 문서는 Angella에서 Gemma 4 Ollama local worker를 실제 `setup -> catalog resolution -> Meta-Harness runtime`까지 연결하는 현재 기준 가이드입니다.
 
 ## 목표
 
 - Gemma 4 Ollama 경로를 실제 setup/runtime 경로로 사용합니다.
 - Ollama 경로는 **Ollama API** topology를 canonical path로 사용합니다.
 - `unsloth/gemma-4-26B-A4B-it-GGUF` 모델을 사용하여 로컬에서 고성능 추론 및 Tool-calling을 수행합니다.
-- Ollama의 `thinking` 필드가 Goose의 JSON 파싱을 방해하지 않도록 **ollama-proxy**를 경유합니다.
+- Ollama의 `thinking` 필드가 JSON 파싱을 방해하지 않도록 **ollama-proxy**를 경유합니다.
 
 ## 1. 기본 설치
 
@@ -39,7 +39,7 @@ export gemma-4-26B-A4B-it-GGUF # AUTO_SYNC:OLLAMA_MODEL_NAME
 
 ## 3. Ollama Proxy 실행
 
-Ollama는 Gemma 4 모델 사용 시 응답에 `thinking` 필드를 포함할 수 있으며, 이는 Goose의 엄격한 JSON 파싱을 방해합니다. 이를 해결하기 위해 투명 프록시를 실행해야 합니다.
+Ollama는 Gemma 4 모델 사용 시 응답에 `thinking` 필드를 포함할 수 있으며, 이는 일부 클라이언트의 JSON 파싱을 방해할 수 있습니다. 이를 해결하기 위해 투명 프록시를 실행해야 합니다.
 
 ```bash
 python3 scripts/ollama_proxy.py &
@@ -64,14 +64,14 @@ Ollama env가 채워져 있으면 Angella는 아래를 자동 처리합니다.
 - `bash setup.sh --check --worker-model ollama_gemma4_26b_gguf # AUTO_SYNC:OLLAMA_MODEL_ID`
   - proxy 및 Ollama health 검사
 - `bash setup.sh --install-only`
-  - Goose custom provider 및 config 자동 렌더링
+  - Meta-Harness 환경 설정 자동 렌더링
 
 ## 6. Runtime Usage
 
-Ollama worker가 선택된 상태에서 Goose는 setup이 렌더링한 provider/model 조합을 사용합니다.
+Ollama worker가 선택된 상태에서 Meta-Harness는 setup이 해결한 모델 정보를 사용합니다.
 
 ```bash
-goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s
+gemini "[Task Instruction]"
 ```
 
 `ollama-proxy`가 실행 중인지 반드시 확인하세요.
@@ -86,5 +86,5 @@ goose run --recipe ~/.config/goose/recipes/autoresearch-loop.yaml -s
 ## 8. 완료 기준
 
 - `.env.mlx` 설정만으로 Ollama worker가 자동 인식된다.
-- `ollama-proxy`를 통해 Goose가 에러 없이 도구를 호출한다.
+- `ollama-proxy`를 통해 도구 호출이 에러 없이 수행된다.
 - `unsloth/gemma-4-26B-A4B-it-GGUF` 모델이 정상적으로 추론을 수행한다.

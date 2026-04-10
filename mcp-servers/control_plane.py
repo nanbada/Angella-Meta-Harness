@@ -166,7 +166,7 @@ def normalize_harness_metadata(harness_metadata: dict[str, Any] | None) -> dict[
             if isinstance(role_meta, dict):
                 provider = str(
                     role_meta.get("provider")
-                    or role_meta.get("goose_provider")
+                    or role_meta.get("harness_provider")
                     or source.get(f"{role}_provider", "")
                 ).strip()
                 model = str(role_meta.get("model") or source.get(f"{role}_model", "")).strip()

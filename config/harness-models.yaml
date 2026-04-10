@@ -3,7 +3,7 @@
     {
       "id": "google_gemini_2_5_pro",
       "provider": "google",
-      "goose_provider": "google",
+      "harness_provider": "google",
       "model": "gemini-2.5-pro",
       "display_name": "Google Gemini 2.5 Pro",
       "role_support": ["lead", "planner", "worker"],
@@ -23,7 +23,7 @@
     {
       "id": "anthropic_claude_opus_4_1",
       "provider": "anthropic",
-      "goose_provider": "anthropic",
+      "harness_provider": "anthropic",
       "model": "claude-opus-4-1-20250805",
       "display_name": "Anthropic Claude Opus 4.1",
       "role_support": ["lead", "planner", "worker"],
@@ -43,7 +43,7 @@
     {
       "id": "anthropic_claude_sonnet_4",
       "provider": "anthropic",
-      "goose_provider": "anthropic",
+      "harness_provider": "anthropic",
       "model": "claude-sonnet-4-20250514",
       "display_name": "Anthropic Claude Sonnet 4",
       "role_support": ["lead", "planner", "worker"],
@@ -63,7 +63,7 @@
     {
       "id": "openai_gpt_5_2",
       "provider": "openai",
-      "goose_provider": "openai",
+      "harness_provider": "openai",
       "model": "gpt-5.2",
       "display_name": "OpenAI GPT-5.2",
       "role_support": ["lead", "planner", "worker"],
@@ -83,7 +83,7 @@
     {
       "id": "openai_gpt_5_2_pro",
       "provider": "openai",
-      "goose_provider": "openai",
+      "harness_provider": "openai",
       "model": "gpt-5.2-pro",
       "display_name": "OpenAI GPT-5.2 Pro",
       "role_support": ["lead", "planner", "worker"],
@@ -103,7 +103,7 @@
     {
       "id": "ollama_gemma4_26b",
       "provider": "ollama",
-      "goose_provider": "ollama",
+      "harness_provider": "ollama",
       "model": "gemma4:26b",
       "display_name": "Ollama Gemma 4 26B",
       "role_support": ["worker"],
@@ -124,7 +124,7 @@
     {
       "id": "apfel_foundationmodel",
       "provider": "custom",
-      "goose_provider": "angella_apfel_local",
+      "harness_provider": "angella_apfel_local",
       "model": "apple-foundationmodel",
       "display_name": "Legacy apfel Foundation Model",
       "role_support": ["worker"],
@@ -145,7 +145,7 @@
     {
       "id": "mlx_gemma4_26b_it_gguf",
       "provider": "custom",
-      "goose_provider": "angella_mlx_local",
+      "harness_provider": "angella_mlx_local",
       "model": "gemma-4-26B-A4B-it-GGUF",
       "display_name": "MLX Gemma 4 26B It (GGUF)",
       "role_support": ["worker"],
@@ -166,7 +166,7 @@
     {
       "id": "ollama_gemma4_26b_gguf",
       "provider": "ollama",
-      "goose_provider": "ollama",
+      "harness_provider": "ollama",
       "model": "gemma-4-26B-A4B-it-GGUF",
       "display_name": "Ollama Gemma 4 26B GGUF (Unsloth)",
       "role_support": ["worker"],

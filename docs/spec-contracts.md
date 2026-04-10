@@ -36,7 +36,7 @@
 - **Fair Heartbeat**: 모든 에이전트는 5분 이내 주기로 상태를 갱신해야 하며, 유효하지 않은 Claim은 `scion_prune_stale` 대상이 됩니다.
 
 ## 5. Transparency (투명성)
-- 모든 기록은 `run_id` 단위로 `$ANGELLA_ROOT/logs/Goose Logs/`에 저장됩니다.
+- 모든 기록은 `run_id` 단위로 `$ANGELLA_ROOT/logs/Meta-Harness Logs/`에 저장됩니다.
 - **Session Log**: 각 iteration의 가설, 시도, 측정값, 판정 근거 기록.
 - **Final Report**: 전체 루프의 성공 여부, 최종 메트릭, 누적 Git Diff 요약.
 - **Telemetry**: `control_plane` 모듈을 통해 모든 이벤트가 JSONL 형태로 기록됩니다.

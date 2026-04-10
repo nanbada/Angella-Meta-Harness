@@ -31,7 +31,7 @@ def _resolve_vault_path() -> str:
 
 
 def _get_log_dir() -> str:
-    log_dir = os.path.join(_resolve_vault_path(), "Goose Logs")
+    log_dir = os.path.join(_resolve_vault_path(), "Meta-Harness Logs")
     os.makedirs(log_dir, exist_ok=True)
     return log_dir
 
