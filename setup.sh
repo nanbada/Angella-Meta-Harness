@@ -15,7 +15,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export ANGELLA_ROOT="$SCRIPT_DIR"
 
-AUTO_YES=false
+AUTO_YES="${AUTO_YES:-false}"
 CHECK_ONLY=false
 BOOTSTRAP_ONLY=false
 INSTALL_ONLY=false

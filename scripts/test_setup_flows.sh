@@ -71,6 +71,7 @@ INSTALL_HOME="$TMP_ROOT/home-install"
 mkdir -p "$CHECK_HOME" "$BOOTSTRAP_HOME" "$INSTALL_HOME"
 
 # Base variables for all runs
+export AUTO_YES="true"
 export GOOGLE_KEY_NAME="GOOGLE_API_KEY"
 export OPENAI_KEY_NAME="OPENAI_API_KEY"
 export ANTHROPIC_KEY_NAME="ANTHROPIC_API_KEY"
