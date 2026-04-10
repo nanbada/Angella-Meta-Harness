@@ -45,4 +45,8 @@ Angella/
 - **Ratchet Pattern**: 메트릭이 개선된 변경만 Commit하고, 실패는 지식화하여 Revert합니다.
 - **Search-First Memory**: 모든 행동 전 `llmwiki`를 조회하여 과거의 실수를 반복하지 않습니다.
 - **Meta-Learning**: `archivist_ops`가 주기적으로 로그를 분석하여 시스템의 '기본 규칙'을 스스로 갱신합니다.
-- **Swarm Coordination**: Scion Hub를 통해 다중 에이전트 간 파일 경합을 방지하고 상태를 공유합니다.
+## 5. CI/CD & 하네스 안정성 (Hardening)
+- **Environment Parity**: `scripts/run-docker-tests.sh`를 통해 로컬에서도 GitHub Actions와 동일한 Ubuntu 24.04 환경의 검증이 가능합니다.
+- **Sync-on-Commit**: `.githooks/pre-commit`이 `sync_project_vars.py`를 강제 실행하여 설정값과 문서/템플릿 간의 불일치를 사전에 차단합니다.
+- **Automated Secret Scanning**: 모든 커밋 전 민감 정보 유출 여부를 자동으로 검사합니다.
+- **Fail-Fast & Traceability**: CI 실패 시 상세 환경 덤프와 `set -x` 트레이스를 통해 즉각적인 디버깅 정보를 제공합니다.

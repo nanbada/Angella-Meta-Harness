@@ -1,0 +1,30 @@
+# Angella CI Replication Environment (Ubuntu 24.04)
+FROM ubuntu:24.04
+
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install essential tools for Angella Setup Flow Tests
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-venv \
+    python3-full \
+    git \
+    curl \
+    bash \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create workspace
+WORKDIR /app
+
+# Copy repository
+COPY . .
+
+# Run the same repo-checks.sh sequence as CI
+CMD ["bash", "-c", "bash scripts/check-secrets.sh && \
+    bash -n setup.sh && \
+    python3 -m py_compile mcp-servers/*.py scripts/*.py && \
+    python3 scripts/run_harness_parity_diff.py && \
+    python3 scripts/validate_harness_schema.py && \
+    bash scripts/test_setup_flows.sh"]

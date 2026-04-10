@@ -3,4 +3,16 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
+echo "[HOOK] Running project variable synchronization..."
+python3 "$ROOT_DIR/scripts/sync_project_vars.py"
+
+# If sync changed files, we need to let the user know or auto-stage them.
+# For safety in CI/CD 2.0, we fail if files are out of sync so the user can review.
+if ! git diff --exit-code; then
+    echo "Error: Project variables were out of sync. Files have been updated." >&2
+    echo "Please review the changes and 'git add' them before committing." >&2
+    exit 1
+fi
+
+echo "[HOOK] Running secret scan..."
 bash "$ROOT_DIR/scripts/check-secrets.sh"
