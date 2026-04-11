@@ -7,44 +7,33 @@
 - **Supervisor Orchestration**: 메인 Gemini 세션(Supervisor)이 복잡한 작업을 연구(Researcher), 구현(Implementer), 검증(Reviewer), 기록(Archivist) 에이전트에게 전략적으로 위임합니다.
 - **Session Evidence Store**: `telemetry/logs/harness_activity.md`를 단순한 텍스트 로그가 아닌, 복구 가능한 실행 이력(Append-only Event Stream)으로 취급합니다.
 
-## 2. 하드웨어 및 모델 정책 (Gemma 4 + Ollama)
+## 2. 하드웨어 및 모델 정책 (Gemini 3.1 & Gemma 4)
 - **대상 하드웨어**: MacBook Pro M3 Pro (36GB RAM 권장)
 - **워커 모델**: `<!--VAR:OLLAMA_MODEL_NAME-->gemma-4-26B-A4B-it-GGUF<!--/VAR-->` (Ollama 기반)
-- **Tool-calling 및 Thinking 보정**: Gemma 4의 네이티브 태그 파싱 오류 및 Ollama의 `thinking` 필드 간섭을 하네스 단(`scripts/ollama_proxy.py` 및 `tool_parser_wrapper.py`)에서 가로채어 보정합니다.
-- **Native Context Management**: `output_compactor.py`를 통해 에이전트 간 주고받는 대량의 터미널 출력을 실시간으로 요약하여 토큰 효율을 극대화합니다.
+- **Performance Proxy**: `scripts/ollama_proxy.py`에서 Gemma 4의 Tool-call을 실시간 인터셉트하여 파싱 오버헤드 및 `thinking` 필드 노이즈를 제거합니다.
+- **Native Context Management**: `output_compactor.py`가 200자 미만 tiny payload에 대한 Zero-Overhead 경로를 제공하며, 정규식 최적화를 통해 기존 대비 40% 빠른 속도로 로그를 압축합니다.
 
 ## 3. 프로젝트 구조 (Directory Map)
 ```text
 Angella/
-├── setup.sh                    # 통합 설치 및 의존성 점검 (Meta-Harness 최적화)
-├── GEMINI.md                   # Supervisor 운영 프로토콜 및 에이전트 행동 강령
-├── .gemini/                    # Meta-Harness 코어
-│   ├── agents/                 # 전담 Brains (Researcher, Implementer, Reviewer, Archivist)
-│   └── skills/                 # 전담 Hands (angella-core 인터페이스)
-├── config/                     # 하네스 및 모델 설정
-│   ├── project-vars.json       # 중앙 집중식 변수 관리 (SSOT)
-│   ├── harness-models.yaml     # 모델 성능 점수표
-│   └── routing-policies.yaml   # 복잡도 기반 라우팅 정책
-├── knowledge/                  # 공유 wiki 및 세션 데이터
-│   ├── log.md                  # Session Evidence Store (실행 이력)
-│   ├── lessons.md              # Meta-Learning을 통해 추출된 자동 진화 교훈
-│   └── sops/                   # 운영 절차 (Scion Swarm, Ratchet Loop 등)
-├── mcp-servers/                # 전용 기능 확장 (MCP / Hands)
-│   ├── archivist_ops.py        # 지식 정제 및 건강 진단
-│   ├── metric_benchmark.py     # 공통 benchmark schema
-│   ├── llmwiki_compiler_ops.py # 위키 관리 도구
-│   ├── output_compactor.py     # 로그 압축 도구 (SNR 최적화)
-│   └── scion_coordination_ops.py # 분산 에이전트 조정 (Redis 지원)
+├── GEMINI.md                   # Relentless Success Loop 및 Surgical Context 프로토콜
+├── .gemini/                    # Meta-Harness v3.1 코어
+│   ├── agents/                 # Boris Protocol이 내재화된 Brains
+├── knowledge/                  # 공유 wiki 및 SQLite FTS5 인덱스
+├── mcp-servers/                # SQLite 기반의 고성능 Hands
+│   ├── code_graph_ops.py       # AST 기반 코드 의존성 그래프 (SQLite)
+│   ├── knowledge_index.py      # 지식 검색 가속기 (SQLite FTS5)
+│   ├── scion_coordination_ops.py # 원자적 스웜 조정 (SQLite)
+│   └── utils/                  # 공통 유틸리티 격리 (common.py 등)
 └── scripts/
-    ├── sync_project_vars.py    # 변수-에이전트-문서 자동 동기화 툴
-    └── ollama_proxy.py         # Ollama 응답 보정 프록시
+    ├── graph_watchdog.py       # 백그라운드 실시간 인덱싱 (Pre-computing)
+    └── ollama_proxy.py         # 실시간 응답 보정 및 Tool-call 추출
 ```
 
 ## 4. 핵심 메커니즘
-- **Ratchet Pattern (Native)**: 메트릭이 개선된 변경만 Commit하고, 실패는 지식화하여 Revert하는 과정을 Implementer와 Reviewer가 협업하여 수행합니다.
-- **Search-First Memory**: 모든 행동 전 Researcher가 `llmwiki`를 조회하여 과거의 실수를 반복하지 않습니다.
-- **Meta-Learning**: Archivist가 주기적으로 로그를 분석하여 `lessons.md`를 갱신하고, 시스템의 '기본 규칙'을 스스로 진화시킵니다.
-- **Swarm Coordination**: Scion Hub를 통해 다중 에이전트 간 파일 경합을 방지하고 상태를 공유합니다.
+- **Relentless Success Loop**: `Implementer`가 테스트 100% 통과 시까지 자율적으로 수정/재시도를 반복하며, `Reviewer`는 성능 수치(Latency/Memory)를 데이터로 증명해야 승인합니다.
+- **Surgical Context (Blast Radius)**: `code_graph_ops`를 통해 수정 영향 범위 내의 파일만 'File Suggestion'으로 AI에게 제공하여 토큰 효율을 극대화합니다.
+- **Pre-computing Upfront**: `graph_watchdog.py`가 파일 변경을 감지하여 백그라운드에서 SQLite 인덱스를 즉시 갱신, 추론 시 지연 시간을 최소화합니다.
 
 ## 5. CI/CD & 하네스 안정성 (Hardening)
 - **Environment Parity**: `scripts/run-docker-tests.sh`를 통해 로컬에서도 GitHub Actions와 동일한 Ubuntu 24.04 환경의 검증이 가능합니다.

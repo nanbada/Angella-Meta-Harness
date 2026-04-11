@@ -29,14 +29,25 @@
 - **Preflight**: Dirty Worktree(미커밋 변경사항 존재) 상태에서는 루프를 시작하지 않습니다.
 - **Ratchet**: `compare_metrics` 결과가 개선일 때만 `keep` 하고, 그 외에는 즉시 `git revert HEAD --no-edit`를 수행합니다.
 
-## 4. Scion Topology Contract (군집 조정 계약)
-다중 에이전트 환경에서 작업 충돌을 방지하기 위해 아래 규약을 준수합니다.
-- **Hub-and-Spoke**: 모든 작업 브랜치는 `main`에서 분기하며, 작업 완료 시 PR을 통해 통합됩니다.
-- **Tiered Priority**: 작업 성격에 따라 우선순위(`Emergency` > `Directive` > `Autoresearch`)를 부여하고 경합 시 상위 티어가 우선권을 가집니다.
+## 4. Scion & Coordination Contracts
+- **SQLite Backbone**: `scion_coordination_ops`는 SQLite 원자적 트랜잭션을 통해 다중 에이전트 간 파일 점유(Claim) 및 상태 공유를 보장합니다.
 - **Fair Heartbeat**: 모든 에이전트는 5분 이내 주기로 상태를 갱신해야 하며, 유효하지 않은 Claim은 `scion_prune_stale` 대상이 됩니다.
 
-## 5. Transparency (투명성)
-- 모든 기록은 `run_id` 단위로 `$ANGELLA_ROOT/logs/Meta-Harness Logs/`에 저장됩니다.
+## 5. Performance Engineering Contracts (Boris Protocol)
+### 5.1. Relentless Success Loop
+- **Max Retries**: 5회.
+- **Verification**: `scripts/repo-checks.sh` 100% 통과 필수.
+- **Correction**: 실패 시 Ollama Proxy의 'High Thinking' 데이터를 활용하여 근본 원인을 분석하고 수정을 반복함.
+
+### 5.2. Surgical Context (Blast Radius)
+- **Indexing**: `code_graph_ops`는 Tree-sitter/AST를 통해 실시간 의존성 정보를 유지함.
+- **Injection**: 에이전트는 수정 전 반드시 `code_graph_blast_radius`를 조회하여 영향 범위 내의 파일만 컨텍스트에 주입해야 함.
+
+### 5.3. Search Acceleration
+- **LLM-Wiki Query**: `knowledge_index` (SQLite FTS5)를 통해 10ms 이내 지식 검색 결과 제공 필수.
+
+## 6. Transparency (투명성)
+- 모든 기록은 `run_id` 단위로 `$ANGELLA_ROOT/telemetry/logs/`에 저장됩니다.
 - **Session Log**: 각 iteration의 가설, 시도, 측정값, 판정 근거 기록.
 - **Final Report**: 전체 루프의 성공 여부, 최종 메트릭, 누적 Git Diff 요약.
 - **Telemetry**: `control_plane` 모듈을 통해 모든 이벤트가 JSONL 형태로 기록됩니다.

@@ -7,6 +7,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Try to import our new fast indexer, fallback if not found (though it should be)
+try:
+    import knowledge_index
+except ImportError:
+    knowledge_index = None
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 def _load_runtime_env() -> dict[str, str]:
@@ -94,10 +100,15 @@ def handle_request(request: dict) -> dict:
         if not target:
             return {"error": "Missing 'target' argument."}
         output = run_npx_llmwiki(["ingest", target])
+        if knowledge_index:
+            knowledge_index.build_index()
         return {"content": [{"type": "text", "text": output}]}
         
     elif tool == "llmwiki_compile":
         output = run_npx_llmwiki(["compile"])
+        if knowledge_index:
+            count = knowledge_index.build_index()
+            output += f"\n[Optimization] Fast SQLite Index rebuilt with {count} documents."
         return {"content": [{"type": "text", "text": output}]}
         
     elif tool == "llmwiki_query":
@@ -105,10 +116,35 @@ def handle_request(request: dict) -> dict:
         save = args.get("save", False)
         if not question:
             return {"error": "Missing 'question' argument."}
+            
+        # Fast Path: SQLite FTS5 Query (Zero-Overhead)
+        if knowledge_index and not save:
+            try:
+                results = knowledge_index.query_index(question, limit=3)
+                if isinstance(results, dict) and "error" in results:
+                    raise Exception(results["error"])
+                
+                if not results:
+                    return {"content": [{"type": "text", "text": "No matching knowledge found in fast index."}]}
+                
+                formatted_out = []
+                for r in results:
+                    formatted_out.append(f"### {r.get('title', 'Unknown')} ({r.get('path')})\n{r.get('matched_content')}\n")
+                
+                return {"content": [{"type": "text", "text": "\n".join(formatted_out)}]}
+            except Exception as e:
+                # Fallback to slow npx method if SQLite fails
+                pass
+
+        # Slow Path / Save Path
         cmd_args = ["query", question]
         if save:
             cmd_args.append("--save")
         output = run_npx_llmwiki(cmd_args)
+        
+        if save and knowledge_index:
+            knowledge_index.build_index()
+            
         return {"content": [{"type": "text", "text": output}]}
         
     elif tool == "llmwiki_save_note":
@@ -124,6 +160,10 @@ def handle_request(request: dict) -> dict:
             return {"error": str(exc)}
 
         file_path.write_text(f"# {title}\n\n{content}", encoding="utf-8")
+        
+        if knowledge_index:
+            knowledge_index.build_index()
+            
         return {
             "content": [
                 {

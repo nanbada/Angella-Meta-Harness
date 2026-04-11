@@ -6,8 +6,8 @@
 
 - Gemma 4 Ollama 경로를 실제 setup/runtime 경로로 사용합니다.
 - Ollama 경로는 **Ollama API** topology를 canonical path로 사용합니다.
-- `unsloth/gemma-4-26B-A4B-it-GGUF` 모델을 사용하여 로컬에서 고성능 추론 및 Tool-calling을 수행합니다.
-- Ollama의 `thinking` 필드가 JSON 파싱을 방해하지 않도록 **ollama-proxy**를 경유합니다.
+- `unsloth/gemma-4-31B-it-GGUF` 모델을 사용하여 로컬에서 고성능 추론 및 Tool-calling을 수행합니다.
+- Ollama의 `thinking` 필드가 JSON 파싱을 방해하지 않도록 **ollama-proxy**를 경유하며, Gemma 4 네이티브 Tool-call 태그를 실시간으로 파싱합니다.
 
 ## 1. 기본 설치
 
@@ -37,15 +37,18 @@ export ANGELLA_OLLAMA_BASE_URL=http://127.0.0.1:11435  # Proxy port
 export gemma-4-26B-A4B-it-GGUF # AUTO_SYNC:OLLAMA_MODEL_NAME
 ```
 
-## 3. Ollama Proxy 실행
+## 3. Ollama Proxy 실행 (v3.1 Optimized)
 
-Ollama는 Gemma 4 모델 사용 시 응답에 `thinking` 필드를 포함할 수 있으며, 이는 일부 클라이언트의 JSON 파싱을 방해할 수 있습니다. 이를 해결하기 위해 투명 프록시를 실행해야 합니다.
+Ollama는 Gemma 4 모델 사용 시 응답에 `thinking` 필드를 포함하거나 네이티브 `<|tool_call|>` 태그를 사용할 수 있습니다. 이를 효율적으로 처리하기 위해 고성능 프록시를 실행합니다.
 
 ```bash
 python3 scripts/ollama_proxy.py &
 ```
 
-이 프록시는 11435 포트에서 대기하며, 11434 포트의 Ollama 서버로 요청을 전달하고 응답에서 `thinking` 필드를 제거합니다.
+이 프록시는 11435 포트에서 대기하며 아래 작업을 수행합니다:
+- **Real-time Tool-Call Parsing**: 모델의 출력에서 `<|tool_call|>` 태그를 감지하여 즉시 JSON으로 변환합니다.
+- **Thinking Strip**: JSON 파싱을 방해하는 `thinking` 필드를 실시간으로 제거합니다.
+- **Zero-Latency**: 별도의 MCP 도구 호출 없이 하네스가 즉시 결과를 사용할 수 있게 합니다.
 
 ## 4. GGUF 모델 등록 (Modelfile)
 

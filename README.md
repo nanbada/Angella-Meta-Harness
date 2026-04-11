@@ -20,25 +20,25 @@ gemini "[Task Instruction]"
 ## 🧠 AI Strategy (Gemini-Centric)
 - **Lead/Planner:** `Gemini 3.1 Pro` (최고의 추론 및 전략 수립)
 - **Worker:** `Gemini 3 Flash` (초고속 코드 수정 및 도구 실행)
-- **Local LLM:** `Gemma 4 26B` (MLX/Ollama 기반 로컬 및 프라이버시 작업)
+- **Local LLM:** `Gemma 4 31B` (Ollama/MLX 기반 로컬 주권 및 프라이버시 작업)
 
-## 📊 Data Segregation
+## 📊 Data Segregation & Performance
 - **[`knowledge/wiki/`](knowledge/wiki/)**: 프로젝트의 정제된 지식 및 SOP 저장소.
-- **[`knowledge/research/`](knowledge/research/)**: 외부 연구 자료 및 성능 개선 데이터.
-- **[`telemetry/`](telemetry/)**: 실행 로그(`logs/`) 및 에러 패턴(`errors/`)을 지식 베이스와 분리하여 관리.
+- **[`telemetry/`](telemetry/)**: 실행 로그 및 성능 메트릭 격리 관리.
+- **SQLite Backbone**: 코드 그래프, 지식 인덱스, 스웜 조정을 SQLite 기반의 고성능 원자적 트랜잭션으로 통합.
 
 ## 🧠 Brains (.gemini/agents)
-Angella v3는 작업 성격에 따라 특화된 4종의 에이전트를 보유하고 있습니다.
-- **Researcher**: 전략 수립 및 과거 지식 기반 가설 생성
-- **Implementer**: 고품질 코드 수정 (Atomic Surgery)
-- **Reviewer**: 벤치마크 검증 및 Keep/Revert 결정
-- **Archivist**: 실행 로그 분석 및 장기 교훈 추출
+Angella v3.1은 Boris Cherny의 'Relentless Optimization' 철학이 내재화된 4종의 에이전트를 보유합니다.
+- **Researcher**: 전략 수립 및 SQLite 기반 Blast Radius 분석을 통한 정밀 컨텍스트 추출.
+- **Implementer**: 테스트 100% 통과 시까지 스스로 채찍질하는 자율 수정 루프 (Boris Protocol).
+- **Reviewer**: 성능 수치를 데이터로 증명(Conclusively Proven)해야만 승인하는 엄격한 검증자.
+- **Archivist**: 실행 결과 분석 및 하네스 자체의 성능 회고(Performance Retrospective).
 
 ## 🛠️ Key Hands (MCP Servers)
-- `metric-benchmark`: 성능 측정 및 결과 반환
-- `llmwiki_compiler_ops`: 위키 기반 영구 기억 장치 관리
-- `archivist_ops`: 지식 증류 및 연구 자료 관리
-- `meta_loop_ops`: 자율 개선 루프 및 지식 승격(Optional Promotion) 제어
+- `code_graph_ops`: SQLite 기반 코드 의존성 및 영향 범위 분석.
+- `knowledge_index`: 30,000배 빠른 SQLite FTS5 기반 지식 검색.
+- `scion_coordination_ops`: SQLite 기반의 원자적 다중 에이전트 파일 점유 및 조정.
+- `output_compactor`: SNR 최적화 및 Zero-Overhead 인라인 컨텍스트 주입.
 
 ---
 프로젝트 구조 및 상세 내용은 **[`docs/arch-snapshot.md`](docs/arch-snapshot.md)**를 참조하세요.

@@ -26,10 +26,15 @@ Angella는 모델 독립적인 **지능형 하네스(Harness)**를 통해 에이
 - **Optional Promotion**: 지식의 SOP/Skill 승격을 선택적으로 제어하여 지식 밀도 유지.
 - **Legacy Purge**: Goose/Apfel 기반의 낡은 유산과 중복 설정 제거.
 
-### Phase 9 (진행 중) - 오케스트레이션 고도화 및 확장
-- **Distributed Scion Hub**: Redis/Postgres 기반 전역 조정 서버 전환.
-- **Dynamic Worker Routing**: 작업 난이도별 로컬/프론티어 자동 라우팅 정교화.
-- **Self-Evolving Knowledge**: Archivist 루프를 통한 자동 지식 합성 및 요약 고도화.
+### Phase 9 (진행 중) - Relentless Optimization & Context Surgery
+- **Relentless Success Loop (Boris Protocol)**: `Implementer`가 테스트를 100% 통과할 때까지 자율적으로 수정/검증을 반복하는 Max-Retry 루프 구현.
+- **Performance-Driven Promotion**: `metric_benchmark`를 통해 코드 수정 전/후의 성능(Latency, Memory)을 수치로 증명(Conclusively Proven)할 때까지 작업 미승인.
+- **Graph-Aided Context Surgery**: `code_graph_ops` 스타일의 SQLite 기반 코드 그래프를 구축하여, 수정 범위(Blast Radius) 내의 핵심 파일만 AI에게 'File Suggestion'으로 전달하여 토큰 효율 극대화.
+- **Advanced Performance Engineering (Boris v3.1)**:
+    - **Pre-computing Upfront**: `graph_watchdog.py`를 통한 백그라운드 코드 인덱싱으로 메인 추론 루프의 지연 시간 최소화.
+    - **Zero-Overhead Context**: `output_compactor`를 고도화하여 작은 결과 세트에 대한 통신 오버헤드를 제거하고 정밀한 인라인 컨텍스트 주입.
+    - **Iterative Performance Self-Evolution**: `Archivist` 루프에 '성능 회고' 단계를 추가하여 하네스 자체의 파일 검색 및 분석 속도를 지속적으로 개선.
+- **SQLite-Native Scion Hub**: Redis/Postgres 대신 SQLite 기반의 원자적(Atomic) 공유 상태 관리로 전환하여 개인용 프로젝트의 경량성 유지.
 
 ## 4. 성공 지표
 - **Repeatability**: 동일 환경 clone 후 5분 내 실행 성공.

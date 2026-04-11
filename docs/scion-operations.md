@@ -1,23 +1,27 @@
-# Scion Operations
+# Scion Operations (v3.1 Optimized)
 
-Angella의 Phase 7 Scion 기능은 실서비스 hub가 아니라 **file-backed coordination MVP**입니다.
-기본 shared state 경로는 `.scion/shared`이며, 필요하면 `SCION_SHARED_DIR`로 다른 공유 디렉터리를 지정할 수 있습니다.
+Angella의 Scion 조정 레이어는 기존의 File-backed 방식에서 **SQLite Backend**로 전면 전환되어 원자성(Atomicity)과 고성능을 제공합니다.
 
-## Shared State Layout
+## Shared State (SQLite Backbone)
 
-```text
-.scion/shared/
-├── agents/
-│   └── <agent-id>.json
-├── claims/
-│   └── <repo-area>.json
-└── events/
-    └── <timestamp>-<agent-id>-<kind>.json
-```
+기본 DB 경로는 `.scion/shared/scion.db`이며, `SCION_BACKEND=sqlite` 환경 변수를 통해 활성화됩니다.
 
-- `agents/`: active agent state, status, intent, claimed files, TTL
-- `claims/`: authoritative exclusive claim records and explicit takeover handoff state
-- `events/`: broadcast, claim, release, heartbeat 같은 recent event log
+### Database Schema
+- **`agents`**: 에이전트 상태, 의도, 현재 점유 중인 파일 목록, TTL 정보.
+- **`claims`**: 특정 파일 경로에 대한 배타적/공유 점유 권한 및 `exclusions`.
+- **`worktrees`**: Git Worktree 예약 및 브랜치 소유권 정보.
+- **`events`**: Broadcast, Heartbeat 등 실시간 이벤트 스트림.
+
+## Key Advantages
+1. **Atomic Transactions**: 다중 에이전트가 동시에 동일 파일을 점유하려 할 때 SQLite의 Row-level 락을 통해 충돌을 완벽히 방지합니다.
+2. **High Performance**: `rglob`으로 수백 개의 JSON을 읽는 대신 인덱싱된 SQL 쿼리로 즉시 상태를 조회합니다.
+3. **Consistency**: 파일 시스템 지연으로 인한 상태 불일치(Drift) 문제를 해결합니다.
+
+## Tool Workflow
+(기존 툴 체인과 동일하되 백엔드만 투명하게 교체됨)
+1. `scion_prune_stale`: 만료된 DB 레코드 정리.
+2. `scion_claim_files`: `exclusive` 모드 시 DB에 배타적 레코드 생성.
+3. `scion_inspect_state`: DB 뷰를 통해 스웜 전체 현황 가시화.
 
 ## Environment Variables
 

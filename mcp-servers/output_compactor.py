@@ -18,29 +18,32 @@ _FAILURE_KEYWORDS = (
     "fail", "failed", "error", "panic", "assert", "traceback", "warning", "exception", "fatal",
 )
 
-_NOISE_PATTERNS = (
-    re.compile(r"^\s*$"),
-    re.compile(r"^\s*Enumerating objects:"),
-    re.compile(r"^\s*Counting objects:"),
-    re.compile(r"^\s*Compressing objects:"),
-    re.compile(r"^\s*Delta compression"),
-    re.compile(r"^\s*Receiving objects:"),
-    re.compile(r"^\s*Resolving deltas:"),
-    re.compile(r"^\s*remote:\s*$"),
-    re.compile(r"^\s*Using\s"),
+_NOISE_PATTERN_COMBINED = re.compile(
+    r"^\s*$|"
+    r"^\s*Enumerating objects:|"
+    r"^\s*Counting objects:|"
+    r"^\s*Compressing objects:|"
+    r"^\s*Delta compression|"
+    r"^\s*Receiving objects:|"
+    r"^\s*Resolving deltas:|"
+    r"^\s*remote:\s*$|"
+    r"^\s*Using\s"
 )
 
+_WS_PATTERN = re.compile(r"\s+")
+_ANSI_PATTERN = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_PATH_PATTERN = re.compile(r"([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)")
 
 def _normalize_whitespace(value: str) -> str:
-    return re.sub(r"\s+", " ", value.strip())
+    return _WS_PATTERN.sub(" ", value.strip())
 
 
 def _strip_ansi(value: str) -> str:
-    return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", value)
+    return _ANSI_PATTERN.sub("", value)
 
 
 def _is_noise(line: str) -> bool:
-    return any(pattern.search(line) for pattern in _NOISE_PATTERNS)
+    return bool(_NOISE_PATTERN_COMBINED.search(line))
 
 
 def _extract_windows(lines: list[str], window_size: int = 2) -> list[str]:
@@ -75,7 +78,7 @@ def _bucketize_paths(lines: list[str]) -> list[str]:
     other: list[str] = []
     
     for line in lines:
-        match = re.search(r"([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)", line)
+        match = _PATH_PATTERN.search(line)
         if not match:
             other.append(line)
             continue
@@ -128,6 +131,14 @@ def _truncate_smart(text: str, budget: int) -> str:
 
 def compact_output(kind: str, text: str, budget_chars: int = 1000) -> dict[str, Any]:
     raw = text or ""
+    # Zero-Overhead Path: for very small payloads, avoid any processing
+    if len(raw) < 200:
+        return {
+            "text": raw,
+            "estimated_tokens_saved": 0,
+            "metrics": {"raw": len(raw), "compact": len(raw), "ratio": 1.0, "saved_tokens": 0}
+        }
+    
     lines = [_strip_ansi(l) for l in raw.splitlines() if not _is_noise(l)]
     
     if kind == "mask":
