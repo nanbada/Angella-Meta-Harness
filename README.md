@@ -20,10 +20,10 @@ gemini "[Task Instruction]"
 ## 🧠 AI Strategy (Gemini-Centric)
 - **Lead/Planner:** `Gemini 3.1 Pro` (최고의 추론 및 전략 수립)
 - **Worker:** `Gemini 3 Flash` (초고속 코드 수정 및 도구 실행)
-- **Local LLM:** `Gemma 4 31B` (Ollama/MLX 기반 로컬 주권 및 프라이버시 작업)
+- **Local LLM:** `SuperGemma 4 26B V2` (Ollama/MLX 기반 Uncensored & High-Logic 로컬 워커)
 
 ## 📊 Data Segregation & Performance
-- **[`knowledge/wiki/`](knowledge/wiki/)**: 프로젝트의 정제된 지식 및 SOP 저장소.
+- **[`knowledge/`](knowledge/)**: Ingest Pipeline 및 객관성 검증(Counter-arguments)이 강화된 정제된 지식 저장소.
 - **[`telemetry/`](telemetry/)**: 실행 로그 및 성능 메트릭 격리 관리.
 - **SQLite Backbone**: 코드 그래프, 지식 인덱스, 스웜 조정을 SQLite 기반의 고성능 원자적 트랜잭션으로 통합.
 

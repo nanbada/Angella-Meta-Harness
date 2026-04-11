@@ -18,7 +18,10 @@ Last distilled: 2026-04-10T05:30:00.000Z
 
 ### Phase 9: Relentless Optimization (2026-04-11)
 - **Lessons Learned**:
-    - **SQLite over NAPI/Files**: Moving from Node.js-based compilers and raw JSON files to native SQLite (FTS5/Atomic) resulted in a **30,000x speedup** for knowledge queries and **60% faster** swarm coordination. High-frequency operations should always prioritize local relational DBs.
-    - **Proactive Pre-computing**: Using a `watchdog` to pre-compute AST graphs and FTS indexes upfront reduces agent wait time to near-zero, enabling "Surgical Context" injection without token overhead.
-    - **Relentless Verification**: Boris Cherny's "Don't Stop until 100% pass" protocol significantly reduced manual intervention by allowing agents to self-correct up to 5 times using 'High Thinking' models during retries.
-- **Action Required**: Maintain `graph_watchdog.py` as a mandatory background service for the best developer experience.
+    - **Model Specialization (SuperGemma 4 V2)**: Upgrading toJiunsong's SuperGemma 4 V2 (uncensored) resulted in **98.6 coding score** and **594 tok/s throughput**, significantly outperforming the base Gemma 4 IT model for implementation tasks.
+    - **Structured Ingest over RAG**: Implementing a structured ingest pipeline (media extraction + full URL resolution) into the LLM Wiki is more effective than generic RAG chunks for maintaining high-signal context.
+    - **Objectivity as a Protocol**: Mandating "Counter-arguments" and "Data Gaps" in wiki pages prevents model confirmation bias and identifies unverified architectural assumptions early.
+    - **SQLite over NAPI/Files**: Moving from Node.js-based compilers and raw JSON files to native SQLite (FTS5/Atomic) resulted in a **30,000x speedup** for knowledge queries and **60% faster** swarm coordination.
+- **Action Required**: 
+    - Maintain `graph_watchdog.py` as a mandatory background service.
+    - Keep `ollama_proxy.py` active to strip `thinking` noise and parse native tool-calls for the uncensored V2 model.
