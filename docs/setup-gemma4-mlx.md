@@ -9,7 +9,7 @@ Set the following environment variables in your `.env.mlx`:
 ```bash
 export ANGELLA_LOCAL_WORKER_BACKEND=mlx
 export ANGELLA_MLX_BASE_URL=http://127.0.0.1:11435/v1 # AUTO_SYNC:MLX_BASE_URL
-export ANGELLA_MLX_MODEL=gemma-4-26B-A4B-it-GGUF # AUTO_SYNC:MLX_MODEL_NAME
+export ANGELLA_MLX_MODEL=supergemma4-26b-uncensored-v2 # AUTO_SYNC:MLX_MODEL_NAME
 ```
 
 ## Setup

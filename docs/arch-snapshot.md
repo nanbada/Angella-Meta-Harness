@@ -9,7 +9,11 @@
 
 ## 2. 하드웨어 및 모델 정책 (Gemini 3.1 & Gemma 4)
 - **대상 하드웨어**: MacBook Pro M3 Pro (36GB RAM 권장)
-- **워커 모델**: `<!--VAR:OLLAMA_MODEL_NAME-->gemma-4-26B-A4B-it-GGUF<!--/VAR-->` (Ollama 기반)
+- **워커 모델**: `<!--VAR:OLLAMA_MODEL_NAME-->supergemma4-26b-uncensored-v2<!--/VAR-->` (Jiunsong SuperGemma 4 V2)
+- **Model Performance**:
+    - **Code**: 98.6 (Original: 92.3)
+    - **Logic**: 95.2 (Original: 86.9)
+    - **Throughput**: 594.76 tok/s (Original: 334.76)
 - **Performance Proxy**: `scripts/ollama_proxy.py`에서 Gemma 4의 Tool-call을 실시간 인터셉트하여 파싱 오버헤드 및 `thinking` 필드 노이즈를 제거합니다.
 - **Native Context Management**: `output_compactor.py`가 200자 미만 tiny payload에 대한 Zero-Overhead 경로를 제공하며, 정규식 최적화를 통해 기존 대비 40% 빠른 속도로 로그를 압축합니다.
 
