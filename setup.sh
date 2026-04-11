@@ -58,21 +58,10 @@ parse_args() {
             --yes|-y)
                 AUTO_YES=true
                 ;;
-            --init-satellite)
-                INIT_SATELLITE=${2:-}
-                shift
-                ;;
             --check)
-...
-    export LEAD_MODEL_OVERRIDE PLANNER_MODEL_OVERRIDE WORKER_MODEL_OVERRIDE
-
-    if [ -n "$INIT_SATELLITE" ]; then
-        bash "$SCRIPT_DIR/scripts/setup-satellite.sh" "$INIT_SATELLITE"
-        exit 0
-    fi
-
-    bash "$SCRIPT_DIR/scripts/setup-bootstrap.sh"
-
+                CHECK_ONLY=true
+                ;;
+            --bootstrap-only)
                 BOOTSTRAP_ONLY=true
                 ;;
             --install-only)
@@ -98,6 +87,10 @@ parse_args() {
                 ;;
             --worker-model)
                 WORKER_MODEL_OVERRIDE=${2:-}
+                shift
+                ;;
+            --init-satellite)
+                INIT_SATELLITE=${2:-}
                 shift
                 ;;
             --help|-h)
@@ -143,6 +136,11 @@ print_banner
 export AUTO_YES CHECK_ONLY BOOTSTRAP_ONLY INSTALL_ONLY
 export LIST_MODELS LIST_HARNESS_PROFILES HARNESS_PROFILE
 export LEAD_MODEL_OVERRIDE PLANNER_MODEL_OVERRIDE WORKER_MODEL_OVERRIDE
+
+if [ -n "$INIT_SATELLITE" ]; then
+    bash "$SCRIPT_DIR/scripts/setup-satellite.sh" "$INIT_SATELLITE"
+    exit 0
+fi
 
 bash "$SCRIPT_DIR/scripts/setup-bootstrap.sh"
 
