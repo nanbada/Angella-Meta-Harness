@@ -25,6 +25,7 @@ HARNESS_PROFILE=""
 LEAD_MODEL_OVERRIDE=""
 PLANNER_MODEL_OVERRIDE=""
 WORKER_MODEL_OVERRIDE=""
+INIT_SATELLITE=""
 
 usage() {
     cat <<EOF
@@ -32,12 +33,14 @@ Usage: bash setup.sh [--yes] [--check] [--bootstrap-only] [--install-only]
                      [--list-models] [--list-harness-profiles]
                      [--harness-profile <id>]
                      [--lead-model <id>] [--planner-model <id>] [--worker-model <id>]
+                     [--init-satellite <path>]
 
 Options:
   --yes             Prompt 없이 기본값으로 설치를 진행합니다.
   --check           설치 없이 의존성 상태만 검증합니다.
   --bootstrap-only  Runtime/toolchain/bootstrap env 준비까지만 수행합니다.
   --install-only    기존 bootstrap env를 사용해 설치 단계만 수행합니다.
+  --init-satellite  타겟 프로젝트에 Angella 지능(에이전트/SOP)을 주입합니다.
   --list-models     Catalog에 등록된 model과 enabled/disabled reason을 출력합니다.
   --list-harness-profiles
                     Harness profile과 resolved lead/planner/worker를 출력합니다.
@@ -55,10 +58,21 @@ parse_args() {
             --yes|-y)
                 AUTO_YES=true
                 ;;
-            --check)
-                CHECK_ONLY=true
+            --init-satellite)
+                INIT_SATELLITE=${2:-}
+                shift
                 ;;
-            --bootstrap-only)
+            --check)
+...
+    export LEAD_MODEL_OVERRIDE PLANNER_MODEL_OVERRIDE WORKER_MODEL_OVERRIDE
+
+    if [ -n "$INIT_SATELLITE" ]; then
+        bash "$SCRIPT_DIR/scripts/setup-satellite.sh" "$INIT_SATELLITE"
+        exit 0
+    fi
+
+    bash "$SCRIPT_DIR/scripts/setup-bootstrap.sh"
+
                 BOOTSTRAP_ONLY=true
                 ;;
             --install-only)

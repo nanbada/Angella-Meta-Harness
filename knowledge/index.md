@@ -39,6 +39,9 @@ This file is the canonical entry point for tracked harness knowledge.
 
 ## Sources
 
+- [Source: Boris Cherny Optimization 20260410](sources/source-boris-cherny-optimization.md)
+- [Source: Personalized AI Memory Layer Architecture](sources/source-personalized-ai-memory-arch.md)
+- [Source: 지금 가장 중요한 AI 아이디어들(2026 4월)](sources/source-important-ai-ideas-2026-04.md)
 - [Harness Source Index](sources/index.md)
 - [Source: Source Summary: angella-live-setup-yes-warm-20260405-2342](sources/source-cache-angella-control-plane-runs-angella-live-setup-yes-warm-20260405-2342-summary-json.md)
 - [Source: Source Report: angella-profile-resolution-verification-20260406-1005](sources/source-cache-angella-control-plane-runs-angella-profile-resolution-verification-20260406-1005-report-md.md)

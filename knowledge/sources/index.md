@@ -4,6 +4,12 @@ Tracked raw-source mirror pages used by the harness wiki.
 
 ## Sources
 
+- [Source: Boris Cherny Optimization 20260410](source-boris-cherny-optimization.md)
+- [Source: Personalized AI Memory Layer Architecture](source-personalized-ai-memory-arch.md)
+- [Source: 지금 가장 중요한 AI 아이디어들(2026 4월)](source-important-ai-ideas-2026-04.md)
+- [Source: AI Personal Knowledge Base (PKB) Guides - Spisak & Karpathy](source-pkb-guides-spisak-karpathy.md)
+... (rest of the list)
+
 - [Source: AI Personal Knowledge Base (PKB) Guides - Spisak & Karpathy](source-pkb-guides-spisak-karpathy.md)
 - [Source: PKB Guide - Grok](source-external-local-personal-knowledge-bases-grok.md)
 - [Source: PKB Guide - ChatGPT](source-external-local-personal-knowledge-bases-chatgpt.md)

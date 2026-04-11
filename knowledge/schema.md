@@ -2,7 +2,27 @@
 
 This wiki is the tracked knowledge layer that sits between raw control-plane evidence and operator-facing answers.
 
+## Quality & Objectivity Rules
+
+To ensure knowledge is robust and resistant to AI bias, every primary wiki page (Concepts, Components, SOPs) should aim to include:
+
+- **Confidence Levels**: Tag claims or patterns as `confidence: high | medium | low` based on the volume of supporting evidence.
+- **Counter-arguments**: Explicitly document why a certain pattern might *not* work or where it has failed in the past.
+- **Data Gaps**: Identify what is currently unknown or unverified about the topic.
+
+## Ingest Pipeline (Raw → Source → Wiki)
+
+1. **Raw Inbox (`knowledge/sources/raw/`)**:
+   - Dump point for clippings, PDFs, images, and links.
+2. **Resolution Phase**:
+   - **Media**: Images/diagrams must be analyzed and have a corresponding `.md` source page with a textual summary (OCR/Visual-to-Text).
+   - **Links**: External URLs should be resolved to full content (transcripts/summaries) and archived in `knowledge/sources/`.
+3. **Classification & Synthesis**:
+   - `angella-archivist` processes resolved sources into structured `knowledge/components/`, `knowledge/concepts/`, or `knowledge/sops/` pages.
+   - New pages are marked `explored: false` until reviewed or verified by a run.
+
 ## Layers
+... (rest of the file)
 
 1. Raw evidence
    - `.cache/angella/control-plane/**`
