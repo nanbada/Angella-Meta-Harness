@@ -61,9 +61,35 @@ def process_raw_to_source(raw_path_str: str) -> str:
     if target_path.exists():
         return f"Already processed: {target_path.relative_to(PROJECT_ROOT)}"
     
-    # Basic distillation (can be enhanced with LLM later)
+    category = "Uncategorized"
+    tags_str = "[]"
+    
+    import urllib.request
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    if api_key:
+        prompt = f"Analyze the following content and provide a JSON response with 'category' (string) and 'tags' (list of strings). Content:\\n\\n{content[:2000]}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"response_mime_type": "application/json"}
+        }
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro:generateContent?key={api_key}"
+        try:
+            req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req) as response:
+                result = json.loads(response.read().decode())
+                text = result["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = json.loads(text)
+                category = parsed.get("category", category)
+                tags = parsed.get("tags", [])
+                tags_str = json.dumps(tags)
+        except Exception:
+            pass
+
+    # Basic distillation (enhanced with LLM category/tags)
     structured_content = f"""---
 title: "{title}"
+category: "{category}"
+tags: {tags_str}
 source_path: "{raw_path_str}"
 processed_at: "{_utc_now().isoformat()}"
 status: "distilled"
@@ -74,7 +100,7 @@ status: "distilled"
 {content}
 
 ## Archivist Metadata
-- Automatically ingested from raw export.
+- Automatically ingested from raw export and categorized by LLM.
 """
     target_path.write_text(structured_content, encoding="utf-8")
     _record_event("distill_source", {"raw": raw_path_str, "target": str(target_path.relative_to(PROJECT_ROOT))})
@@ -198,8 +224,8 @@ def handle_request(request: dict) -> dict:
             return {"content": [{"type": "text", "text": "\n".join(audit_report)}]}
 
         elif tool == "archivist_distill_lessons":
-            log_path = KNOWLEDGE_DIR / "log.md"
-            if not log_path.exists(): return {"error": "log.md not found"}
+            log_path = PROJECT_ROOT / "telemetry" / "logs" / "harness_activity.md"
+            if not log_path.exists(): return {"error": "harness_activity.md not found"}
             
             log_content = log_path.read_text(encoding="utf-8")
             # Extract run summaries
@@ -213,7 +239,11 @@ def handle_request(request: dict) -> dict:
                 
                 # Heuristic: only look at accepted or verification runs with specific keywords
                 if "accepted" in title or "failed" in content.lower() or "error" in content.lower():
-                    lessons.append(f"### {title}\n{content.strip()}")
+                    perf_hint = ""
+                    times = re.findall(r"(\d+\.\d+s|\d+ tok/s|\d+ms)", content)
+                    if times:
+                        perf_hint = f"\n- **Performance Retrospective**: {', '.join(set(times))}"
+                    lessons.append(f"### {title}\n{content.strip()}{perf_hint}")
             
             lessons_file = KNOWLEDGE_DIR / "lessons.md"
             output = [

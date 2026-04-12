@@ -16,6 +16,7 @@ from typing import Any
 
 _FAILURE_KEYWORDS = (
     "fail", "failed", "error", "panic", "assert", "traceback", "warning", "exception", "fatal",
+    "syntaxerror", "typeerror", "valueerror", "indexerror", "keyerror",
 )
 
 _NOISE_PATTERN_COMBINED = re.compile(
@@ -51,17 +52,28 @@ def _extract_windows(lines: list[str], window_size: int = 2) -> list[str]:
     if not lines:
         return []
     
-    indices = [i for i, line in enumerate(lines) if any(kw in line.lower() for kw in _FAILURE_KEYWORDS)]
-    if not indices:
+    keep = set()
+    in_traceback = False
+    
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        if "traceback (most recent call last):" in line_lower:
+            in_traceback = True
+            
+        if in_traceback:
+            keep.add(i)
+            # The exception line itself (unindented) ends the block
+            if line.strip() and not line.startswith(" ") and not line.startswith("\t") and "traceback" not in line_lower:
+                in_traceback = False
+                
+        if any(kw in line_lower for kw in _FAILURE_KEYWORDS):
+            for offset in range(-window_size, window_size + 1):
+                target = i + offset
+                if 0 <= target < len(lines):
+                    keep.add(target)
+    if not keep:
         return lines[:10] + ["... (no errors found, showing first 10 lines)"] if len(lines) > 10 else lines
 
-    keep = set()
-    for idx in indices:
-        for offset in range(-window_size, window_size + 1):
-            target = idx + offset
-            if 0 <= target < len(lines):
-                keep.add(target)
-    
     output = []
     last_idx = -1
     for idx in sorted(list(keep)):
@@ -145,6 +157,8 @@ def compact_output(kind: str, text: str, budget_chars: int = 1000) -> dict[str, 
         compacted = f"[OBSERVATION MASKED] {len(lines)} lines omitted."
     elif kind in {"test_output", "benchmark_output"}:
         compacted = "\n".join(_dedupe_lines(_extract_windows(lines)))
+        if "Traceback " in compacted or "traceback" in compacted.lower():
+            budget_chars = max(budget_chars, 4000)
     elif kind in {"git_status", "ls_find", "rg"}:
         compacted = "\n".join(_bucketize_paths(lines))
     else:

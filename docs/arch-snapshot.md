@@ -15,7 +15,7 @@
     - **Logic**: 95.2 (Original: 86.9)
     - **Throughput**: 594.76 tok/s (Original: 334.76)
 - **Performance Proxy**: `scripts/ollama_proxy.py`에서 Gemma 4의 Tool-call을 실시간 인터셉트하여 파싱 오버헤드 및 `thinking` 필드 노이즈를 제거합니다.
-- **Native Context Management**: `output_compactor.py`가 200자 미만 tiny payload에 대한 Zero-Overhead 경로를 제공하며, 정규식 최적화를 통해 기존 대비 40% 빠른 속도로 로그를 압축합니다.
+-   **Native Context Management**: `output_compactor.py`가 200자 미만 tiny payload에 대한 Zero-Overhead 경로를 제공하며, 정규식 최적화 및 **Python Traceback 보존 알고리즘**을 통해 디버깅 핵심 정보를 유지하면서 로그를 60~90% 압축합니다. 에러 감지 시 토큰 버퍼를 최대 4000자까지 동적 확장합니다.
 
 ## 3. 프로젝트 구조 (Directory Map)
 ```text
@@ -27,7 +27,9 @@ Angella/
 ├── mcp-servers/                # SQLite 기반의 고성능 Hands
 │   ├── code_graph_ops.py       # AST 기반 코드 의존성 그래프 (SQLite)
 │   ├── knowledge_index.py      # 지식 검색 가속기 (SQLite FTS5)
-│   ├── scion_coordination_ops.py # 원자적 스웜 조정 (SQLite)
+│   ├── scion_coordination_ops.py # 원자적 스웜 조정 (SQLite WAL)
+│   ├── ingest_ops.py           # Multi-modal 지식 수집 (Clipboard/Vision/X)
+│   ├── archivist_ops.py        # 지식 증류 및 Performance Retrospective 로그 분석
 │   └── utils/                  # 공통 유틸리티 격리 (common.py 등)
 └── scripts/
     ├── graph_watchdog.py       # 백그라운드 실시간 인덱싱 (Pre-computing)
@@ -36,7 +38,7 @@ Angella/
 
 ## 4. 핵심 메커니즘
 - **Relentless Success Loop**: `Implementer`가 테스트 100% 통과 시까지 자율적으로 수정/재시도를 반복하며, `Reviewer`는 성능 수치(Latency/Memory)를 데이터로 증명해야 승인합니다.
-- **Surgical Context (Blast Radius)**: `code_graph_ops`를 통해 수정 영향 범위 내의 파일만 'File Suggestion'으로 AI에게 제공하여 토큰 효율을 극대화합니다.
+- **Surgical Context (Blast Radius)**: `code_graph_ops`를 통해 수정 영향 범위 내의 파일만 'File Suggestion'으로 제공합니다. 50줄 이내의 심볼 정의는 **응답 JSON에 인라인 스니펫으로 즉시 주입**하여 추가적인 파일 조회 오버헤드를 제로화(Zero-Overhead)합니다.
 - **Pre-computing Upfront**: `graph_watchdog.py`가 파일 변경을 감지하여 백그라운드에서 SQLite 인덱스를 즉시 갱신, 추론 시 지연 시간을 최소화합니다.
 
 ## 5. CI/CD & 하네스 안정성 (Hardening)

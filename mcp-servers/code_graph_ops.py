@@ -135,7 +135,7 @@ def get_blast_radius(symbol_name: str, depth: int = 2) -> Dict[str, Any]:
             
             # Find callers (Who calls me?)
             cursor.execute("""
-                SELECT s.id, s.name, s.kind, f.path as file_path 
+                SELECT s.id, s.name, s.kind, s.start_line, s.end_line, f.path as file_path 
                 FROM symbols s
                 JOIN relationships r ON s.id = r.from_symbol_id
                 JOIN files f ON s.file_id = f.id
@@ -145,7 +145,21 @@ def get_blast_radius(symbol_name: str, depth: int = 2) -> Dict[str, Any]:
             for row in cursor.fetchall():
                 if row['id'] not in visited:
                     visited.add(row['id'])
-                    affected_symbols.append(dict(row))
+                    sym_dict = dict(row)
+                    
+                    # Zero-Overhead Context Injection
+                    start = sym_dict.get('start_line')
+                    end = sym_dict.get('end_line')
+                    if start and end and (end - start) < 50:
+                        try:
+                            fpath = _angella_root() / sym_dict['file_path']
+                            if fpath.exists():
+                                lines = fpath.read_text(encoding="utf-8").splitlines()
+                                sym_dict['code_snippet'] = "\n".join(lines[start - 1 : end])
+                        except Exception:
+                            pass
+                            
+                    affected_symbols.append(sym_dict)
                     to_process.append((row['id'], curr_depth + 1))
         
         return {
@@ -154,6 +168,40 @@ def get_blast_radius(symbol_name: str, depth: int = 2) -> Dict[str, Any]:
             "affected_count": len(affected_symbols),
             "affected_symbols": affected_symbols
         }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+    finally:
+        conn.close()
+
+def get_symbol_def(symbol_name: str) -> Dict[str, Any]:
+    """
+    Zero-overhead context surgery. Returns the full inline code block for a symbol.
+    """
+    conn = sqlite3.connect(_db_path())
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT s.name, s.kind, s.start_line, s.end_line, f.path as file_path 
+            FROM symbols s
+            JOIN files f ON s.file_id = f.id
+            WHERE s.name = ? 
+        """, (symbol_name,))
+        rows = cursor.fetchall()
+        if not rows:
+            return {"status": "error", "message": f"Symbol '{symbol_name}' not found."}
+        
+        results = []
+        for row in rows:
+            res = dict(row)
+            start, end = res.get("start_line"), res.get("end_line")
+            if start and end:
+                fpath = _angella_root() / res["file_path"]
+                if fpath.exists():
+                    lines = fpath.read_text(encoding="utf-8").splitlines()
+                    res['code_snippet'] = "\n".join(lines[start - 1 : end])
+            results.append(res)
+        return {"status": "success", "results": results}
     except Exception as e:
         return {"status": "error", "message": str(e)}
     finally:
@@ -244,6 +292,8 @@ def handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
         return index_file(args.get("file_path"), args.get("symbols", []), args.get("relationships", []))
     if tool == "code_graph_blast_radius":
         return get_blast_radius(args.get("symbol_name"), args.get("depth", 2))
+    if tool == "code_graph_get_symbol_def":
+        return get_symbol_def(args.get("symbol_name"))
     
     return {"error": f"Unknown tool: {tool}"}
 

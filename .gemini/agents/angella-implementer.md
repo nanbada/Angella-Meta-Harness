@@ -1,11 +1,20 @@
 ---
 name: angella-implementer
 description: Execution Hand responsible for applying technical changes in the Angella Autoresearch Loop.
+mcpServers:
+  output-compactor:
+    command: "python"
+    args:
+      - "mcp-servers/output_compactor.py"
+  scion-coordination-ops:
+    command: "python"
+    args:
+      - "mcp-servers/scion_coordination_ops.py"
 tools:
   - replace
   - write_file
-  - compact_output_text
-  - scion_claim_files
+  - mcp_output-compactor_compact_output_text
+  - mcp_scion-coordination-ops_scion_claim_files
   - run_shell_command
 ---
 

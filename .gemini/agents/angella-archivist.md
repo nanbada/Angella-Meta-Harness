@@ -1,11 +1,27 @@
 ---
 name: angella-archivist
 description: Memory Optimizer responsible for distilling long-term lessons from the session event stream and managing the ingest pipeline.
+mcpServers:
+  archivist-ops:
+    command: "python"
+    args:
+      - "mcp-servers/archivist_ops.py"
+  llmwiki-compiler-ops:
+    command: "python"
+    args:
+      - "mcp-servers/llmwiki_compiler_ops.py"
+  ingest-ops:
+    command: "python"
+    args:
+      - "mcp-servers/ingest_ops.py"
 tools:
-  - archivist_distill_lessons
-  - archivist_health_check
-  - archivist_distill
-  - llmwiki_compiler_ops
+  - mcp_archivist-ops_archivist_distill_lessons
+  - mcp_archivist-ops_archivist_health_check
+  - mcp_archivist-ops_archivist_distill
+  - mcp_llmwiki-compiler-ops_llmwiki_compiler_ops
+  - mcp_ingest-ops_ingest_clipboard
+  - mcp_ingest-ops_ingest_x_article
+  - mcp_ingest-ops_ingest_image_vision
 ---
 
 # Angella Knowledge Archivist

@@ -3,7 +3,7 @@
 This skill provides the **Hand** interface for the Angella Autoresearch Loop. Use this skill to interact with the Angella execution environment and persistent state.
 
 ## Runtime Configuration
-- **Worker Model**: `<!--VAR:OLLAMA_MODEL_NAME-->gemma-4-26B-A4B-it-GGUF<!--/VAR-->` (Tier: `local`)
+- **Worker Model**: `<!--VAR:OLLAMA_MODEL_NAME-->supergemma4-26b-uncensored-v2<!--/VAR-->` (Tier: `local`)
 - **Backend**: `ollama` (Port: `11434`)
 - **Base URL**: `http://127.0.0.1:11434`
 

@@ -1,12 +1,29 @@
 ---
 name: angella-researcher
 description: Brain responsible for Strategy and Memory in the Angella Autoresearch Loop.
+mcpServers:
+  llmwiki-compiler-ops:
+    command: "python"
+    args:
+      - "mcp-servers/llmwiki_compiler_ops.py"
+  code-graph-ops:
+    command: "python"
+    args:
+      - "mcp-servers/code_graph_ops.py"
+  scion-coordination-ops:
+    command: "python"
+    args:
+      - "mcp-servers/scion_coordination_ops.py"
+  archivist-ops:
+    command: "python"
+    args:
+      - "mcp-servers/archivist_ops.py"
 tools:
-  - llmwiki_query
-  - code_graph_blast_radius
-  - scion_inspect_state
+  - mcp_llmwiki-compiler-ops_llmwiki_query
+  - mcp_code-graph-ops_code_graph_blast_radius
+  - mcp_scion-coordination-ops_scion_inspect_state
   - codebase_investigator
-  - archivist_get_reconciliation_context
+  - mcp_archivist-ops_archivist_get_reconciliation_context
 ---
 
 # Angella Strategic Researcher

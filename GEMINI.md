@@ -18,10 +18,10 @@
     *   **Surgical Context Strategy**: 
     *   불필요한 전체 파일 읽기를 금지합니다.
     *   `code_graph_ops`를 사용하여 수정 대상의 Blast Radius(연관 함수/클래스/테스트)를 식별하고, 해당 범위 내의 파일만 컨텍스트에 주입합니다 (File Suggestion).
-    *   **Zero-Overhead Context**: 수십 줄 이내의 작은 코드 조각이나 단순 심볼 정의는 무거운 MCP 호출 대신 `output_compactor`를 통해 인라인으로 즉시 전달하여 오버헤드를 최소화합니다.
+    *   **Zero-Overhead Context**: 수십 줄 이내의 작은 코드 조각이나 단순 심볼 정의는 무거운 MCP 호출 대신 `output_compactor`를 통해 인라인으로 즉시 전달하거나, `code_graph_ops`에서 JSON 모델 내부에 직접 주입하여 오버헤드를 최소화합니다.
 
 *   **Minimalist Ingestion**: Never `read_file` an entire large file (>100 lines) without first using `grep_search` or `glob` to isolate points of interest.
-*   **Compaction-First**: All tool outputs exceeding 1KB (git status, logs, search results) must be processed through `output_compactor` or similar surgical logic before entering the reasoning context.
+*   **Compaction-First**: All tool outputs exceeding 1KB (git status, logs, search results) must be processed through `output_compactor` or similar surgical logic before entering the reasoning context. **Python Traceback은 예외적으로 전체 문맥을 보존합니다.**
 *   **State Compression**: Prefer summarizing previous multi-turn results into a single "Fact" or "Snapshot" rather than maintaining raw logs of every intermediate step.
 *   **Search-First Memory**: Before proposing any technical strategy, mandatory check of `knowledge/` or `llmwiki` for previous patterns, failures, or established SOPs to prevent token-heavy trial-and-error.
 
@@ -45,4 +45,4 @@
 *   **Self-Improving Loop**: Always check `knowledge/lessons.md` at the start of a session to inherit meta-learnings from past runs.
 
 ---
-*Last Updated: 2026-04-09 - Gemini Memories preserved.*
+*Last Updated: 2026-04-12 - Gemini Memories preserved.*

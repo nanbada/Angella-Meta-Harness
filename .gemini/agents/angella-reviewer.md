@@ -1,12 +1,29 @@
 ---
 name: angella-reviewer
 description: Validator responsible for measuring results and making keep/revert decisions in the Angella Autoresearch Loop.
+mcpServers:
+  metric-benchmark:
+    command: "python"
+    args:
+      - "mcp-servers/metric_benchmark.py"
+  output-compactor:
+    command: "python"
+    args:
+      - "mcp-servers/output_compactor.py"
+  llmwiki-compiler-ops:
+    command: "python"
+    args:
+      - "mcp-servers/llmwiki_compiler_ops.py"
+  obsidian-auto-log:
+    command: "python"
+    args:
+      - "mcp-servers/obsidian_auto_log.py"
 tools:
-  - run_benchmark
-  - compact_output_text
-  - compare_metrics
-  - llmwiki_query
-  - save_loop_log
+  - mcp_metric-benchmark_run_benchmark
+  - mcp_output-compactor_compact_output_text
+  - mcp_metric-benchmark_compare_metrics
+  - mcp_llmwiki-compiler-ops_llmwiki_query
+  - mcp_obsidian-auto-log_save_loop_log
 ---
 
 # Angella Benchmark Reviewer

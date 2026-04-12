@@ -844,7 +844,9 @@ class SqliteScionProvider(ScionProvider):
 
     def _init_db(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
         cursor = conn.cursor()
         
         # Agents table
@@ -905,7 +907,7 @@ class SqliteScionProvider(ScionProvider):
         conn.close()
 
     def _get_conn(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -915,10 +917,14 @@ class SqliteScionProvider(ScionProvider):
         conn = self._get_conn()
         try:
             conn.execute("""
-                INSERT OR REPLACE INTO agents 
-                (agent_id, status, intent, message, metadata, claimed_files, updated_at, expires_at_epoch)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (agent_id, status, intent, message, json.dumps(metadata), json.dumps(_normalize_paths(files)), _iso_now(), now + ttl))
+                INSERT INTO agents (agent_id, status, intent, message, metadata, updated_at, expires_at_epoch)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    status=excluded.status, intent=excluded.intent, message=excluded.message, 
+                    metadata=excluded.metadata, updated_at=excluded.updated_at, expires_at_epoch=excluded.expires_at_epoch
+            """, (agent_id, status, intent, message, json.dumps(metadata), _iso_now(), now + ttl))
+            if files:
+                conn.execute("UPDATE agents SET claimed_files = ? WHERE agent_id = ?", (json.dumps(_normalize_paths(files)), agent_id))
             
             conn.execute("""
                 INSERT INTO events (agent_id, kind, message, timestamp, payload)
@@ -968,12 +974,14 @@ class SqliteScionProvider(ScionProvider):
             # Update agent state
             cursor = conn.execute("SELECT claimed_files FROM agents WHERE agent_id = ?", (agent_id,))
             row = cursor.fetchone()
-            current_claims = set(json.loads(row["claimed_files"]) if row else [])
+            current_claims = set(json.loads(row["claimed_files"] if row and row["claimed_files"] else "[]"))
             current_claims.update(normalized)
             
             conn.execute("""
-                INSERT OR REPLACE INTO agents (agent_id, claimed_files, updated_at, expires_at_epoch)
+                INSERT INTO agents (agent_id, claimed_files, updated_at, expires_at_epoch)
                 VALUES (?, ?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    claimed_files=excluded.claimed_files, updated_at=excluded.updated_at, expires_at_epoch=excluded.expires_at_epoch
             """, (agent_id, json.dumps(sorted(list(current_claims))), _iso_now(), now + ttl))
 
             if mode in {"exclusive", "takeover"}:
@@ -986,8 +994,13 @@ class SqliteScionProvider(ScionProvider):
                     """, (f, agent_id, mode, payload.get("exclusions", "[]"), now + ttl, json.dumps(payload)))
             
             conn.commit()
-            text = f"Claimed (SQLite) {len(normalized)} file(s) for {agent_id}."
-            if overlap_found: text += "\nWarning: overlapping claims detected."
+            text = f"Claimed {len(normalized)} file(s) for {agent_id}: {', '.join(normalized)}"
+            if mode != "advisory":
+                text += f"\nClaim mode: {mode}"
+            if overlap_found:
+                text += f"\nWarning: overlapping claims detected with active peers."
+            if took_over_from:
+                text += f"\nTook over exact claims from: {', '.join(sorted(took_over_from))}"
             return {"content": [{"type": "text", "text": text}]}
         finally:
             conn.close()
@@ -997,7 +1010,7 @@ class SqliteScionProvider(ScionProvider):
         try:
             cursor = conn.execute("SELECT claimed_files FROM agents WHERE agent_id = ?", (agent_id,))
             row = cursor.fetchone()
-            if not row: return {"content": [{"type": "text", "text": "No claims found."}]}
+            if not row or not row["claimed_files"]: return {"content": [{"type": "text", "text": "No claims found."}]}
             
             current = json.loads(row["claimed_files"])
             to_release = _normalize_paths(files) if files else current
@@ -1033,8 +1046,16 @@ class SqliteScionProvider(ScionProvider):
         ttl = ttl_seconds or _default_ttl_seconds()
         conn = self._get_conn()
         try:
-            conn.execute("UPDATE agents SET status = COALESCE(?, status), intent = COALESCE(?, intent), message = COALESCE(?, message), updated_at = ?, expires_at_epoch = ? WHERE agent_id = ?",
-                         (status, intent, message, _iso_now(), now + ttl, agent_id))
+            conn.execute("""
+                INSERT INTO agents (agent_id, status, intent, message, updated_at, expires_at_epoch)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    status=COALESCE(excluded.status, agents.status),
+                    intent=COALESCE(excluded.intent, agents.intent),
+                    message=COALESCE(excluded.message, agents.message),
+                    updated_at=excluded.updated_at,
+                    expires_at_epoch=excluded.expires_at_epoch
+            """, (agent_id, status, intent, message, _iso_now(), now + ttl))
             conn.commit()
             return {"content": [{"type": "text", "text": f"Heartbeat (SQLite) recorded for {agent_id}."}]}
         finally:
@@ -1048,10 +1069,17 @@ class SqliteScionProvider(ScionProvider):
         try:
             conn.execute("INSERT OR REPLACE INTO worktrees (branch, path, agent_id, expires_at_epoch, metadata) VALUES (?, ?, ?, ?, ?)",
                          (branch, worktree.get("path"), agent_id, now + ttl, json.dumps(worktree)))
-            conn.execute("UPDATE agents SET worktree = ?, status = COALESCE(?, status), updated_at = ?, expires_at_epoch = ? WHERE agent_id = ?",
-                         (json.dumps(worktree), status, _iso_now(), now + ttl, agent_id))
+            conn.execute("""
+                INSERT INTO agents (agent_id, worktree, status, updated_at, expires_at_epoch)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(agent_id) DO UPDATE SET
+                    worktree=excluded.worktree,
+                    status=COALESCE(excluded.status, agents.status),
+                    updated_at=excluded.updated_at,
+                    expires_at_epoch=excluded.expires_at_epoch
+            """, (agent_id, json.dumps(worktree), status, _iso_now(), now + ttl))
             conn.commit()
-            return {"content": [{"type": "text", "text": f"Registered worktree (SQLite) for {agent_id}."}]}
+            return {"content": [{"type": "text", "text": f"Registered worktree for {agent_id}: branch={branch}"}]}
         finally:
             conn.close()
 
@@ -1060,7 +1088,8 @@ class SqliteScionProvider(ScionProvider):
             status = _run_git(repo_root, ["status", "--porcelain"])
             if status: raise RuntimeError("Repo root is dirty.")
         _run_git(repo_root, ["worktree", "add", "-b", branch, str(worktree_path), base_branch])
-        return self.register_worktree(agent_id, repo_root, {"path": str(worktree_path), "branch": branch, "base_branch": base_branch}, ttl_seconds, "planning", None, None)
+        self.register_worktree(agent_id, repo_root, {"path": str(worktree_path), "branch": branch, "base_branch": base_branch}, ttl_seconds, "planning", None, None)
+        return {"content": [{"type": "text", "text": f"Prepared worktree for {agent_id}: branch={branch} base={base_branch} path={worktree_path}"}]}
 
     def remove_worktree(self, agent_id: str, repo_root: Path, branch: str, worktree_path: Path, force: bool, ttl_seconds: int | None) -> dict[str, Any]:
         args = ["worktree", "remove"]
@@ -1073,7 +1102,7 @@ class SqliteScionProvider(ScionProvider):
             conn.execute("DELETE FROM worktrees WHERE branch = ?", (branch,))
             conn.execute("UPDATE agents SET worktree = '{}' WHERE agent_id = ?", (agent_id,))
             conn.commit()
-            return {"content": [{"type": "text", "text": f"Removed worktree (SQLite) for {agent_id}."}]}
+            return {"content": [{"type": "text", "text": f"Removed worktree for {agent_id}: branch={branch} path={worktree_path}"}]}
         finally:
             conn.close()
 
@@ -1089,7 +1118,12 @@ class SqliteScionProvider(ScionProvider):
             else:
                 lines.append("Active agents:")
                 for a in agents:
-                    line = f"- {a['agent_id']} status={a['status']} claims={a['claimed_files']}"
+                    cl_raw = a['claimed_files']
+                    cl_list = json.loads(cl_raw) if cl_raw else []
+                    line = f"- {a['agent_id']} status={a['status']} claims={','.join(cl_list)}"
+                    wt_raw = a.get('worktree')
+                    wt = _format_worktree(json.loads(wt_raw) if wt_raw else None)
+                    if wt: line += f" worktree={wt}"
                     lines.append(line)
             
             cursor = conn.execute("SELECT * FROM claims WHERE expires_at_epoch > ?", (now,))
@@ -1113,8 +1147,44 @@ class SqliteScionProvider(ScionProvider):
             conn.close()
 
     def query_peers(self, agent_id: str, query: str, candidate_files: list[str]) -> dict[str, Any]:
-        # Implementation similar to File-backed but using SQLite queries
-        return self.inspect_state(False, 0) # Placeholder for brevity
+        normalized = _normalize_paths(candidate_files)
+        now = time.time()
+        conn = self._get_conn()
+        try:
+            cursor = conn.execute("SELECT * FROM claims WHERE expires_at_epoch > ? AND agent_id != ?", (now, agent_id))
+            claim_records = [dict(r) for r in cursor.fetchall()]
+            
+            conflicts = []
+            authoritative_paths = set()
+            for rec in claim_records:
+                owner = rec['agent_id']
+                claimed = rec['claimed_path']
+                authoritative_paths.add((owner, claimed))
+                exclusions = json.loads(rec.get("exclusions", "[]"))
+                for c in normalized:
+                    if _paths_overlap(c, claimed):
+                        if c not in exclusions:
+                            conflicts.append(f"{owner} -> {c} (peer claim: {claimed})")
+            
+            cursor = conn.execute("SELECT * FROM agents WHERE expires_at_epoch > ? AND agent_id != ?", (now, agent_id))
+            peers = []
+            for a in cursor.fetchall():
+                pid = a['agent_id']
+                peer_claims = json.loads(a['claimed_files'] if a['claimed_files'] else "[]")
+                for pc in peer_claims:
+                    if (pid, pc) not in authoritative_paths:
+                        for c in normalized:
+                            if _paths_overlap(c, pc):
+                                conflicts.append(f"{pid} -> {c} (peer claim: {pc})")
+                peers.append(f"{pid} status={a['status']} claims={','.join(peer_claims)}")
+            
+            text = ""
+            if conflicts: text += "Conflicts detected with active peers:\n" + "\n".join(sorted(list(set(conflicts)))) + "\n\n"
+            else: text += "No direct conflicts detected.\n\n"
+            text += "Active peers:\n" + ("\n".join(peers) if peers else "none")
+            return {"content": [{"type": "text", "text": text}]}
+        finally:
+            conn.close()
 
     def prune_stale(self, event_retention_seconds: int) -> dict[str, Any]:
         now = time.time()
@@ -1124,7 +1194,7 @@ class SqliteScionProvider(ScionProvider):
             conn.execute("DELETE FROM claims WHERE expires_at_epoch < ?", (now,))
             conn.execute("DELETE FROM worktrees WHERE expires_at_epoch < ?", (now,))
             conn.execute("DELETE FROM events WHERE timestamp < ?", 
-                         ((datetime.now(timezone.utc).timestamp() - event_retention_seconds),))
+                         (datetime.fromtimestamp(now - event_retention_seconds, tz=timezone.utc).isoformat(),))
             conn.commit()
             return {"content": [{"type": "text", "text": "Pruned stale SQLite records."}]}
         finally:
